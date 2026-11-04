@@ -1,0 +1,63 @@
+// The certified metrics by domain, each with its value for the viewer (read with their own rights)
+// and its lineage. A metric opens its record.
+
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { Link } from "react-router";
+import { api, docPath } from "@ferrum/client";
+import { ErrorState, PageLoading, useShellTitle } from "@ferrum/kit";
+
+export interface Row {
+  id: string;
+  [k: string]: unknown;
+}
+
+const rows = (entity: string, filters: unknown[], extra: Record<string, string | number> = {}) =>
+  api.get<{ rows: Row[] }>(docPath(entity), { filters: JSON.stringify(filters), limit: 500, ...extra }).then((r) => r.rows);
+
+/** Metrics by domain, domains in name order, "Other" last. */
+export function byDomain(list: Row[]): [string, Row[]][] {
+  const out = new Map<string, Row[]>();
+  for (const m of list) {
+    const d = typeof m.domain === "string" && m.domain ? m.domain : "Other";
+    out.set(d, [...(out.get(d) ?? []), m]);
+  }
+  return [...out.entries()].sort(([a], [b]) => (a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b)));
+}
+
+export function Home() {
+  useShellTitle("Metrics");
+  const q = useQuery({ queryKey: ["metrics", "certified"], queryFn: () => rows("Metric", [["status", "eq", "Certified"]], { sort: "metric_name asc" }) });
+  const values = useQueries({
+    queries: (q.data ?? []).map((m) => ({
+      queryKey: ["metrics", "value", m.metric_name],
+      queryFn: () => api.get<{ value: string }>("/api/app/metrics/value", { metric: String(m.metric_name) }).then((r) => r.value),
+    })),
+  });
+  if (q.isPending) return <PageLoading />;
+  if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
+  const valueOf = new Map((q.data ?? []).map((m, i) => [m.id, values[i]?.data]));
+  return (
+    <div className="np-page">
+      <header className="row" style={{ justifyContent: "space-between" }}>
+        <h2>Certified metrics</h2>
+        <Link to="/e/Metric/new">New metric</Link>
+      </header>
+      {byDomain(q.data).map(([domain, list]) => (
+        <section key={domain} className="card card-pad stack" aria-label={domain}>
+          <h3>{domain}</h3>
+          <div className="np-columns">
+            {list.map((m) => (
+              <Link key={m.id} className="card card-pad stack" to={`/e/Metric/${m.id}`}>
+                <strong>{String(m.metric_name)}</strong>
+                <span style={{ fontSize: 28 }}>
+                  {valueOf.get(m.id) ?? "…"} {String(m.unit ?? "")}
+                </span>
+                <span className="faint">{String(m.uses ?? "")}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}

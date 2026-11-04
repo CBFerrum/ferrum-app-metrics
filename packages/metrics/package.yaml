@@ -1,0 +1,32 @@
+package: metrics
+version: 0.1.0
+label: Metrics
+description: "Metrics defined once on Studio, certified by a steward, kept under change control with their lineage, read with each person's own rights, and a glossary"
+depends: [core]
+
+modules:
+  - name: metrics
+    label: Metrics
+    icon: layout-dashboard
+    order: 62
+    items: [Metric, BusinessTerm, MetricSnapshot]
+
+roles:
+  - name: Metric Author
+    description: Defines metrics and glossary terms; their metrics are certified by someone else.
+    permissions:
+      - {entity: Metric, read: true, write: true, create: true}
+      - {entity: BusinessTerm, read: true, write: true, create: true}
+      - {entity: MetricSnapshot, read: true}
+  - name: Data Steward
+    description: Certifies and deprecates metrics, and keeps the glossary.
+    permissions:
+      - {entity: Metric, read: true, write: true}
+      - {entity: BusinessTerm, read: true, write: true, create: true}
+      - {entity: MetricSnapshot, read: true, export: true}
+  - name: Metric Reader
+    description: Reads certified metrics, with their own rights to the records they count.
+    permissions:
+      - {entity: Metric, read: true, where: {status: Certified}}
+      - {entity: BusinessTerm, read: true}
+      - {entity: MetricSnapshot, read: true, if_owner: true}
