@@ -61,6 +61,7 @@ cd ui && npm run build && npm run check
 
 | Version | Highlights |
 |---|---|
+| **0.1.1** | Rebuilt with Ferrum-Frontend 80ff179: labels name their fields, and linked titles show their titles. |
 | **0.1.0** | Metrics defined once on Studio, certified by a steward, kept under change control with their lineage, read with each person's own rights, and a glossary (FERRUM-ECOSYSTEM-010). |
 
 ## License
