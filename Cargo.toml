@@ -1,0 +1,34 @@
+[package]
+name = "ferrum-app-metrics"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Governed analytics on Studio: metrics defined once, certified by a steward, kept under change control with their lineage, read with each person's own rights, and a business glossary"
+repository = "https://github.com/CBFerrum/ferrum-app-metrics"
+build = "build.rs"
+
+[dependencies]
+ferrum-kernel = { git = "https://github.com/CBFerrum/Ferrum", branch = "main" }
+ferrum-meta = { git = "https://github.com/CBFerrum/Ferrum", branch = "main" }
+ferrum-domain = { git = "https://github.com/CBFerrum/Ferrum", branch = "main" }
+ferrum-studio = { git = "https://github.com/CBFerrum/Ferrum", branch = "main" }
+sha2 = "0.10"
+hex = "0.4"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+rust_decimal = { version = "1.43", features = ["serde-with-str", "maths"] }
+serde_json = "1"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "uuid", "chrono", "rust_decimal", "json", "migrate", "macros"] }
+uuid = { version = "1.10", features = ["v4", "v7", "serde"] }
+
+[dev-dependencies]
+# Its tests check that its interface is a release the platform takes.
+ferrum-apps = { git = "https://github.com/CBFerrum/Ferrum", branch = "main" }
+tokio = { version = "1.45", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+
+[lints.clippy]
+# Deliberate patterns shared with the platform: sqlx row tuples.
+type_complexity = "allow"
+
+[profile.dev]
+debug = "line-tables-only"

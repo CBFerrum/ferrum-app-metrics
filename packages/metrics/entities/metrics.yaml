@@ -1,0 +1,60 @@
+- name: BusinessTerm
+  label: Business Term
+  label_plural: Glossary
+  kind: master
+  module: metrics
+  title_field: term
+  description: A word the business uses, defined once.
+  fields:
+    - {name: term, type: data, required: true, unique: true, in_list: true}
+    - {name: definition, type: text, required: true}
+    - {name: owner, type: email, in_list: true}
+  list: {columns: [term, owner], sort: term asc}
+
+- name: MetricTerm
+  label: Term
+  kind: child
+  fields:
+    - {name: term, type: link, to: BusinessTerm, required: true, in_list: true}
+
+- name: Metric
+  label: Metric
+  label_plural: Metrics
+  kind: master
+  module: metrics
+  title_field: metric_name
+  description: A number defined once as a Studio query of one measure. Certified by a steward who does not own it, it stays certified while its definition does; everyone reads it with their own rights.
+  fields:
+    - {name: metric_name, type: data, required: true, unique: true, in_list: true}
+    - {name: description, type: text}
+    - {name: owner, type: email, read_only: true, no_copy: true, in_list: true, in_filter: true}
+    - {name: domain, type: data, in_list: true, in_filter: true, description: "Sales, Finance, People"}
+    - {name: definition, type: json, required: true, description: "A Studio query with exactly one measure"}
+    - {name: unit, type: data}
+    - {name: terms, type: table, of: MetricTerm}
+    - {name: uses, type: text, read_only: true, no_copy: true, label: Lineage, description: "The record and fields it reads"}
+    - {name: status, type: select, options: [Draft, Certified, Deprecated], default: Draft, read_only: true, no_copy: true, in_list: true, in_filter: true}
+    - {name: certified_by, type: email, read_only: true, no_copy: true}
+    - {name: certified_at, type: datetime, read_only: true, no_copy: true}
+    - {name: certified_hash, type: data, read_only: true, no_copy: true, hidden: true}
+    - {name: replaced_by, type: link, to: Metric, read_only: true, no_copy: true}
+  actions:
+    - {name: certify, label: Certify It, permission: write, condition: "doc.status == 'Draft'"}
+    - {name: deprecate, label: Deprecate It, permission: write, condition: "doc.status != 'Deprecated'", params: [{name: replaced_by, type: link, to: Metric, label: Replaced By}]}
+    - {name: snapshot, label: Record Its Value, permission: read, condition: "doc.status == 'Certified'"}
+  list: {columns: [metric_name, domain, owner, status], sort: metric_name asc}
+
+- name: MetricSnapshot
+  label: Metric Value
+  label_plural: Metric Values
+  kind: master
+  module: metrics
+  title_field: metric
+  description: A certified metric's value as one person read it, at a moment, kept.
+  fields:
+    - {name: metric, type: link, to: Metric, required: true, read_only: true, in_list: true, in_filter: true}
+    - {name: value, type: decimal, read_only: true, in_list: true}
+    - {name: read_by, type: email, read_only: true, in_list: true}
+    - {name: read_at, type: datetime, read_only: true, in_list: true}
+    - {name: certified_hash, type: data, read_only: true, hidden: true}
+  list: {columns: [metric, value, read_by, read_at], sort: read_at desc}

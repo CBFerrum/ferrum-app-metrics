@@ -1,0 +1,30 @@
+id: metrics
+name: Metrics
+version: 0.1.0
+publisher: cbferrum
+summary: "Metrics defined once on Studio, certified by a steward, kept under change control with their lineage, read with each person's own rights, and a glossary"
+description: README.md
+categories: [analytics]
+license: AGPL-3.0-only
+homepage: https://github.com/CBFerrum/ferrum-app-metrics
+support: https://github.com/CBFerrum/ferrum-app-metrics/issues
+runtime: native
+platform: ">=0.3.2, <0.4"
+packages: [metrics]
+uninstall: ask
+# Its own interface at /kpis/ (the core keeps /metrics): the certified metrics with their values for the viewer.
+ui:
+  dist: ui/dist
+contributes:
+  shell.app:
+    - id: metrics
+      route: kpis
+      title: Metrics
+      description: Certified metrics and the glossary
+      icon: layout-dashboard
+      color: "#0f766e"
+      roles: [Metric Author, Data Steward, Metric Reader]
+  shell.open:
+    - {id: metrics, package: metrics, path: "kpis/e/{entity}/{id}", list: "kpis/e/{entity}"}
+  shell.create:
+    - {id: metric, label: Metric, path: kpis/e/Metric/new, entity: Metric}
