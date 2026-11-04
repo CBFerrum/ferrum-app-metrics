@@ -42,6 +42,11 @@ export function Home() {
         <h2>Certified metrics</h2>
         <Link to="/e/Metric/new">New metric</Link>
       </header>
+      {q.data.length === 0 && (
+        <p className="faint">
+          No metric is certified yet. <Link to="/e/Metric">Metrics in draft</Link> wait for a Data Steward.
+        </p>
+      )}
       {byDomain(q.data).map(([domain, list]) => (
         <section key={domain} className="card card-pad stack" aria-label={domain}>
           <h3>{domain}</h3>
