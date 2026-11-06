@@ -91,6 +91,7 @@ cd ui && npm run build && npm run check
 
 | Version | Highlights |
 |---|---|
+| **0.3.2** | Rebuilt with Ferrum-Frontend a64416a: a box whose default is 1 shows ticked; action dialogs say every refusal and ask once; definitions built with Studio's report builder. |
 | **0.3.1** | Rebuilt with Ferrum-Frontend a76295e: times on a person's own clock when they chose one. |
 | **0.3.0** | Governed datasets across linked records, certified with their columns; the warehouse feed of datasets as CSV or JSON lines and of metrics' values since a time; lineage naming linked records. |
 | **0.2.2** | Rebuilt with Ferrum-Frontend 24c3951: times on the workspace's clock; drafts headed as drafts. |
