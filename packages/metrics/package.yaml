@@ -9,7 +9,7 @@ modules:
     label: Metrics
     icon: layout-dashboard
     order: 62
-    items: [Metric, BusinessTerm, MetricSnapshot]
+    items: [Metric, BusinessTerm, MetricSnapshot, MetricSubscription]
 
 roles:
   - name: Metric Author
@@ -18,15 +18,27 @@ roles:
       - {entity: Metric, read: true, write: true, create: true}
       - {entity: BusinessTerm, read: true, write: true, create: true}
       - {entity: MetricSnapshot, read: true}
+      - {entity: MetricSubscription, read: true, write: true, create: true, delete: true, if_owner: true}
   - name: Data Steward
     description: Certifies and deprecates metrics, and keeps the glossary.
     permissions:
       - {entity: Metric, read: true, write: true}
       - {entity: BusinessTerm, read: true, write: true, create: true}
       - {entity: MetricSnapshot, read: true, export: true}
+      - {entity: MetricSubscription, read: true, write: true, create: true, delete: true, if_owner: true}
   - name: Metric Reader
     description: Reads certified metrics, with their own rights to the records they count.
     permissions:
       - {entity: Metric, read: true, where: {status: Certified}}
       - {entity: BusinessTerm, read: true}
       - {entity: MetricSnapshot, read: true, if_owner: true}
+      - {entity: MetricSubscription, read: true, write: true, create: true, delete: true, if_owner: true}
+
+# Personal-data requests reach the people Metrics names by address: who owns, certifies and reads a
+# metric, who keeps a term, and who follows one. Erasure takes the address off; the records stay.
+personal_data:
+  - {entity: Metric, match: owner, erase: [owner]}
+  - {entity: Metric, match: certified_by, erase: [certified_by]}
+  - {entity: BusinessTerm, match: owner, erase: [owner]}
+  - {entity: MetricSnapshot, match: read_by, erase: [read_by]}
+  - {entity: MetricSubscription, match: subscriber, erase: [subscriber]}
