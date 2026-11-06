@@ -34,6 +34,14 @@ Governed metrics for [Ferrum](https://github.com/CBFerrum/Ferrum), on Studio:
   whoever asks is pointed at its replacement.
 - **Who sees what.** Metric Readers see certified metrics only. A draft is read only by its owner.
 
+- **Followed.** A person follows a certified metric, daily, weekly or monthly. On its day in the
+  workspace, upkeep reads it for them with their own rights, keeps that as a value of theirs, and
+  tells them the way they chose for "Metrics you follow". A metric deprecated since is said so
+  once, with what replaces it, and is no longer delivered. One back in draft waits until it is
+  certified again. Nobody follows for someone else, and followers see only their own.
+- **Personal data.** Requests reach who owns, certifies, reads and follows a metric, and who keeps
+  a term.
+
 ## Develop
 
 ```bash
@@ -54,13 +62,14 @@ cd ui && npm run build && npm run check
 
 - Metrics over time (a series), and targets with alerts when a value crosses them.
 - Metrics built from other metrics (ratios), and a semantic layer joining records.
-- Values kept on a schedule, rather than when someone records them.
+- Values kept on a schedule for no one in particular: they are kept as each follower reads them.
 - Lineage beyond one record: the fields a linked record contributes.
 
 ## Changelog
 
 | Version | Highlights |
 |---|---|
+| **0.2.0** | Certified metrics delivered to who follows them, read with their own rights, daily, weekly or monthly; personal data declared. |
 | **0.1.3** | Rebuilt with Ferrum-Frontend 00dea07: a workflow state's kept fields are read-only, its needed ones required. |
 | **0.1.2** | Rebuilt with Ferrum-Frontend daeadda: actions say what they did. |
 | **0.1.1** | Rebuilt with Ferrum-Frontend 80ff179: labels name their fields, and linked titles show their titles. |
