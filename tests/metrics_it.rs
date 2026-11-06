@@ -4,7 +4,9 @@
 //! run; its lineage; certified only by a steward who does not own it; read by each person with their
 //! own rights, so two sales reps and their director read three numbers from one definition; its
 //! value kept as a snapshot; a changed definition back in draft until certified again; deprecation
-//! pointing at what replaces it; the glossary; and who may do what.
+//! pointing at what replaces it; the glossary; certified metrics delivered to who follows them,
+//! each read with their own rights, once on their day, and a deprecated one said so once; and who
+//! may do what.
 
 use ferrum_kernel::secret::SecretKey;
 use ferrum_kernel::tenant::NewTenant;
@@ -204,6 +206,58 @@ async fn scenario() {
     refused(read(&k, &author, "Company customers").await, "invalid", "deprecated: read All customers instead");
     assert_eq!(v(read(&k, &director, "All customers").await.unwrap()), 4.0);
     assert_eq!(v(read(&k, &rep2, "All customers").await.unwrap()), 1.0);
+
+    // ───────────── delivered to who follows them ─────────────
+    let follow = |metric: Uuid, frequency: &str| json!({"metric": metric.to_string(), "frequency": frequency});
+    // The steward sees the deprecated one, and is refused it too.
+    refused(t.k.insert(&steward, "MetricSubscription", obj(follow(mid, "Weekly"))).await, "invalid", "only a certified metric is followed");
+    let hers = t.insert(&rep1, "MetricSubscription", follow(all_customers, "Weekly")).await;
+    assert_eq!(hers["subscriber"], "rep1@numbers.test", "a person follows for themselves");
+    refused(t.k.insert(&rep1, "MetricSubscription", obj(follow(all_customers, "Daily"))).await, "invalid", "you follow it already");
+    let his = t.insert(&director, "MetricSubscription", follow(all_customers, "Daily")).await;
+    let terms_follow = t.insert(&director, "MetricSubscription", follow(terms, "Monthly")).await;
+    let told = |who: Uuid| {
+        let k = k.clone();
+        async move {
+            let mut tx = k.db.tenant_tx(tenant).await.unwrap();
+            let n: i64 = sqlx::query_scalar("select count(*) from notification where tenant_id = $1 and user_id = $2 and kind = 'metrics.digest'")
+                .bind(tenant)
+                .bind(who)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            n
+        }
+    };
+    ferrum_app_metrics::maintenance(&k).await.expect("delivered");
+    // Each read with their own rights, kept as a value, and told.
+    let h = t.get("MetricSubscription", uid(&hers["id"])).await;
+    let d = t.get("MetricSubscription", uid(&his["id"])).await;
+    assert_eq!((dec(&h["last_value"]), dec(&d["last_value"])), (3.0, 4.0), "the three she made; all four");
+    assert!(h["last_sent_on"].is_string() && h["last_error"].is_null(), "{h:?}");
+    assert_eq!((told(rep1.user).await, told(director.user).await), (1, 2), "hers, and his two");
+    let kept = t.k.list(&rep1, "MetricSnapshot", &ListQuery::default()).await.unwrap().rows;
+    assert!(kept.iter().any(|s| dec(&s["value"]) == 3.0), "kept as a value of hers");
+    // Not again until it is due.
+    ferrum_app_metrics::maintenance(&k).await.expect("upkeep");
+    assert_eq!((told(rep1.user).await, told(director.user).await), (1, 2), "once a day at most");
+    // A metric deprecated since is said so once, and no longer delivered.
+    t.act(&steward, terms, "deprecate", json!({"replaced_by": all_customers.to_string()})).await.unwrap();
+    let mut tx = k.db.tenant_tx(tenant).await.unwrap();
+    sqlx::query("update e_metric_subscription set last_sent_on = last_sent_on - 40 where tenant_id = $1 and id = $2")
+        .bind(tenant)
+        .bind(uid(&terms_follow["id"]))
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    ferrum_app_metrics::maintenance(&k).await.expect("upkeep");
+    let gone = t.get("MetricSubscription", uid(&terms_follow["id"])).await;
+    assert_eq!(gone["active"], false, "{gone:?}");
+    assert_eq!(told(director.user).await, 3, "told it is deprecated, and what replaces it");
+    // Someone else's is not theirs to see.
+    assert_eq!(t.k.list(&rep2, "MetricSubscription", &ListQuery::default()).await.unwrap().rows.len(), 0);
 
     // ───────────── who may do what ─────────────
     refused(t.k.insert(&rep1, "Metric", obj(metric("Mine", def("Company")))).await, "forbidden", "");

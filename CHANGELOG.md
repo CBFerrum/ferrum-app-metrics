@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+Followed metrics (FERRUM-ECOSYSTEM-010: scheduled delivery).
+
+- A person follows a certified metric (`MetricSubscription`), daily, weekly or monthly, for
+  themselves only, once each. On its day in the workspace, upkeep reads it with their own rights,
+  keeps the value as theirs (a Metric Value), and tells them by `metrics.digest`, in the app unless
+  they chose otherwise. Each follower sees only their own subscriptions.
+- A metric deprecated since is said so once, naming what replaces it, and stops. One back in draft
+  keeps why it was not sent, and is delivered again once certified. A follower no longer active
+  keeps why too.
+- Personal-data requests now reach metrics' owners and certifiers, terms' owners, readers of
+  values and followers.
+
 ## 0.1.3
 
 Rebuilt with Ferrum-Frontend 00dea07: in a workflow state that names what may change, the other fields show read-only, and the fields the state needs show required.
