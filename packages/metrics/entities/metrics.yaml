@@ -58,3 +58,21 @@
     - {name: read_at, type: datetime, read_only: true, in_list: true}
     - {name: certified_hash, type: data, read_only: true, hidden: true}
   list: {columns: [metric, value, read_by, read_at], sort: read_at desc}
+
+- name: MetricSubscription
+  label: Followed Metric
+  label_plural: Followed Metrics
+  kind: master
+  module: metrics
+  title_field: metric
+  owner_fields: [subscriber]
+  description: A certified metric delivered to whoever follows it, as often as they ask, read with their own rights and kept as a value.
+  fields:
+    - {name: metric, type: link, to: Metric, required: true, in_list: true, in_filter: true}
+    - {name: subscriber, type: email, default_expr: "user.email", read_only: true, no_copy: true, in_list: true, in_filter: true, label: Follower}
+    - {name: frequency, type: select, options: [Daily, Weekly, Monthly], default: Weekly, required: true, in_list: true}
+    - {name: active, type: check, default: true, in_list: true, in_filter: true}
+    - {name: last_sent_on, type: date, read_only: true, no_copy: true, in_list: true}
+    - {name: last_value, type: decimal, read_only: true, no_copy: true, in_list: true}
+    - {name: last_error, type: text, read_only: true, no_copy: true, description: "Why it was not delivered the last time"}
+  list: {columns: [metric, subscriber, frequency, last_sent_on, last_value, active], sort: created_at desc}

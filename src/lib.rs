@@ -6,17 +6,21 @@
 //!   certification by a steward who does not own it, undone by a change of definition; values
 //!   read with the reader's rights; snapshots kept; deprecation pointing at what replaces it.
 //! * `site`: `/api/app/metrics/value`, a metric's value for whoever asks.
+//! * `delivery`: certified metrics delivered to whoever follows them, daily, weekly or monthly,
+//!   read with their own rights and kept as values.
 //!
 //! This app's own design; no code was copied (docs/PROVENANCE.md). Hooks are registered per entity,
 //! so a workspace without the `metrics` package never runs them.
 
+mod delivery;
 mod metric;
 mod site;
 
 use ferrum_domain::reports::ReportSource;
-use ferrum_kernel::{Doc, HookRegistry, Kernel, Result};
+use ferrum_kernel::{Doc, Error, HookRegistry, Kernel, Result};
 use serde_json::Value;
 use std::sync::Arc;
+use uuid::Uuid;
 
 include!(concat!(env!("OUT_DIR"), "/packages.rs"));
 include!(concat!(env!("OUT_DIR"), "/ui.rs"));
@@ -31,7 +35,7 @@ pub fn packages() -> std::result::Result<Vec<ferrum_meta::Package>, ferrum_meta:
 
 /// Registers this app's document hooks, and its endpoint.
 pub fn register(hooks: &mut HookRegistry) {
-    hooks.register("Metric", Arc::new(metric::MetricHook));
+    hooks.register("Metric", Arc::new(metric::MetricHook)).register("MetricSubscription", Arc::new(delivery::SubscriptionHook));
     hooks.add_site("metrics", Arc::new(site::MetricsSite));
 }
 
@@ -40,9 +44,18 @@ pub fn reports() -> Vec<Arc<dyn ReportSource>> {
     vec![]
 }
 
-/// Upkeep: nothing runs by itself.
-pub async fn maintenance(_k: &Kernel) -> Result<()> {
-    Ok(())
+/// Upkeep: each workspace's followed metrics delivered on the day they are due.
+pub async fn maintenance(k: &Kernel) -> Result<()> {
+    let mut tx = k.db.system_tx().await?;
+    let tenants: Vec<Uuid> = sqlx::query_scalar("select id from tenant where status = 'active' order by id").fetch_all(&mut *tx).await?;
+    tx.commit().await?;
+    let mut first_error: Option<Error> = None;
+    for tenant in tenants {
+        if let Err(e) = delivery::deliver(k, tenant).await {
+            first_error.get_or_insert(e);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 /// A document from JSON.
