@@ -1,6 +1,6 @@
 id: metrics
 name: Metrics
-version: 0.2.0
+version: 0.2.1
 publisher: cbferrum
 summary: "Metrics defined once on Studio, certified by a steward, kept under change control with their lineage, read with each person's own rights, delivered to who follows them, and a glossary"
 description: README.md
