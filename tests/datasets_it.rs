@@ -12,7 +12,6 @@ use ferrum_kernel::tenant::NewTenant;
 use ferrum_kernel::{Ctx, Db, DbConfig, Doc, Error, HookRegistry, Kernel, KernelSettings, ListQuery};
 use ferrum_meta::Catalog;
 use serde_json::{Map, Value, json};
-use std::sync::Arc;
 use uuid::Uuid;
 
 fn obj(v: Value) -> Doc {
