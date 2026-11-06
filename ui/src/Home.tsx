@@ -1,5 +1,6 @@
 // The certified metrics by domain, each with its value for the viewer (read with their own rights)
-// and its lineage. A metric opens its record.
+// and its lineage, then the certified datasets with their addresses for a warehouse to load. Each
+// opens its record.
 
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
@@ -14,6 +15,11 @@ export interface Row {
 const rows = (entity: string, filters: unknown[], extra: Record<string, string | number> = {}) =>
   api.get<{ rows: Row[] }>(docPath(entity), { filters: JSON.stringify(filters), limit: 500, ...extra }).then((r) => r.rows);
 
+/** A certified dataset's address for a warehouse (or a download), in `format`. */
+export function loadUrl(name: string, format: "csv" | "ndjson"): string {
+  return `/api/app/metrics/dataset?${new URLSearchParams({ name, format }).toString()}`;
+}
+
 /** Metrics by domain, domains in name order, "Other" last. */
 export function byDomain(list: Row[]): [string, Row[]][] {
   const out = new Map<string, Row[]>();
@@ -27,6 +33,7 @@ export function byDomain(list: Row[]): [string, Row[]][] {
 export function Home() {
   useShellTitle("Metrics");
   const q = useQuery({ queryKey: ["metrics", "certified"], queryFn: () => rows("Metric", [["status", "eq", "Certified"]], { sort: "metric_name asc" }) });
+  const sets = useQuery({ queryKey: ["metrics", "datasets"], queryFn: () => rows("Dataset", [["status", "eq", "Certified"]], { sort: "dataset_name asc" }) });
   const values = useQueries({
     queries: (q.data ?? []).map((m) => ({
       queryKey: ["metrics", "value", m.metric_name],
@@ -63,6 +70,31 @@ export function Home() {
           </div>
         </section>
       ))}
+      <section className="card card-pad stack" aria-label="Datasets">
+        <header className="row" style={{ justifyContent: "space-between" }}>
+          <h3>Certified datasets</h3>
+          <Link to="/e/Dataset/new">New dataset</Link>
+        </header>
+        {(sets.data ?? []).length === 0 && <p className="faint">No dataset is certified yet.</p>}
+        <ul className="stack">
+          {(sets.data ?? []).map((d) => (
+            <li key={d.id} className="stack" style={{ gap: 2 }}>
+              <span>
+                <Link to={`/e/Dataset/${d.id}`}>{String(d.dataset_name)}</Link> ·{" "}
+                <a href={loadUrl(String(d.dataset_name), "csv")} download>
+                  CSV
+                </a>{" "}
+                ·{" "}
+                <a href={loadUrl(String(d.dataset_name), "ndjson")} download>
+                  JSON lines
+                </a>
+              </span>
+              <span className="faint">{String(d.uses ?? "")}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="faint">A warehouse loads these addresses with an API key: it reads what that key's person may read.</p>
+      </section>
     </div>
   );
 }

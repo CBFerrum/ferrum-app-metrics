@@ -1,6 +1,8 @@
-//! Metrics' endpoint (`/api/app/metrics/value?metric=<name>`): a certified metric's value for the
-//! signed-in person, with their own rights to the records it counts, and what it means. A metric in
-//! draft is read only by its owner; a deprecated one points at what replaces it.
+//! Metrics' endpoints, for the signed-in person (or an API key) with their own rights to the records
+//! counted. `/api/app/metrics/value?metric=<name>`: a certified metric's value and what it means. A
+//! metric in draft is read only by its owner; a deprecated one points at what replaces it.
+//! `dataset?name=<name>&format=csv|ndjson` and `values?since=<time>` are the warehouse feed
+//! (`warehouse`).
 
 use crate::metric::value;
 use ferrum_domain::util::{id, s, sys};
@@ -13,8 +15,15 @@ pub struct MetricsSite;
 impl Site for MetricsSite {
     async fn handle(&self, k: &Kernel, req: SiteRequest) -> Result<SiteResponse> {
         let user = req.user.as_ref().ok_or_else(|| Error::Unauthorized("sign in first".into()))?;
-        if (req.method.as_str(), req.path.trim_matches('/')) != ("GET", "value") {
-            return Err(Error::NotFound(format!("metrics endpoint {} {}", req.method, req.path)));
+        let param = |key: &str| req.query.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty());
+        match (req.method.as_str(), req.path.trim_matches('/')) {
+            ("GET", "value") => {}
+            ("GET", "dataset") => {
+                let name = param("name").ok_or_else(|| Error::field("name", "is required"))?;
+                return crate::warehouse::dataset(k, user, name, param("format").unwrap_or("csv")).await;
+            }
+            ("GET", "values") => return crate::warehouse::values(k, user, param("since")).await,
+            _ => return Err(Error::NotFound(format!("metrics endpoint {} {}", req.method, req.path))),
         }
         let name =
             req.query.get("metric").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()).ok_or_else(|| Error::field("metric", "is required"))?;

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0
+
+Governed datasets, and the warehouse feed (FERRUM-ECOSYSTEM-010).
+
+- **Dataset:** a table defined once as a Studio query: record fields, or groupings and measures,
+  with filters and sort, reaching linked records and child tables by `link.field`. A pivot or a
+  comparison is refused, since a warehouse needs columns that stay the same whatever the rows.
+  It is checked against the records and its author's rights when saved.
+- **Governed as a metric is:** a Data Steward who does not own it certifies it, which keeps its
+  columns ("name (Label): type"). A changed definition puts it back in draft. It is deprecated
+  naming what replaces it. Metric Readers see certified datasets only.
+- **Lineage across records:** a metric's or a dataset's lineage now names each linked record it
+  reads and by which field, e.g. "Customer: payment_terms_days; CustomerGroup (by customer_group):
+  group_name".
+- **The warehouse feed:** `GET /api/app/metrics/dataset?name=&format=csv|ndjson` gives a certified
+  dataset's rows to whoever asks (an API key's person, for a warehouse), with their own rights, up
+  to 10,000 rows. `x-ferrum-dataset-hash` carries the definition's fingerprint, and
+  `x-ferrum-truncated` says when rows were cut short. CSV quotes as RFC 4180 does, and turns a text
+  a spreadsheet would run as a formula into plain text; JSON lines carry the values exactly.
+  `GET /api/app/metrics/values?since=` gives certified metrics' kept values after a time, oldest
+  first, without who read them; `x-ferrum-next-since` is where the next load starts.
+- The home page lists certified datasets with their CSV and JSON lines addresses.
+
 ## 0.2.2
 
 Rebuilt with Ferrum-Frontend 24c3951: its pages show times on the workspace's clock, naming the zone when it is not the browser's, a draft numbered on submit is headed as a draft, and a record of an app that is not installed says so.
