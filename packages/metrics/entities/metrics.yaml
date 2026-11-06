@@ -29,7 +29,7 @@
     - {name: description, type: text}
     - {name: owner, type: email, read_only: true, no_copy: true, in_list: true, in_filter: true}
     - {name: domain, type: data, in_list: true, in_filter: true, description: "Sales, Finance, People"}
-    - {name: definition, type: json, required: true, description: "A Studio query with exactly one measure"}
+    - {name: definition, type: json, widget: studio_query, required: true, description: "A Studio query with exactly one measure"}
     - {name: unit, type: data}
     - {name: terms, type: table, of: MetricTerm}
     - {name: uses, type: text, read_only: true, no_copy: true, label: Lineage, description: "The record and fields it reads"}
@@ -89,7 +89,7 @@
     - {name: description, type: text}
     - {name: owner, type: email, read_only: true, no_copy: true, in_list: true, in_filter: true}
     - {name: domain, type: data, in_list: true, in_filter: true, description: "Sales, Finance, People"}
-    - {name: definition, type: json, required: true, description: "A Studio query: its columns (record fields, or groupings and measures), filters and sort; linked records' fields as link.field"}
+    - {name: definition, type: json, widget: studio_query, required: true, description: "A Studio query: its columns (record fields, or groupings and measures), filters and sort; linked records' fields as link.field"}
     - {name: terms, type: table, of: MetricTerm}
     - {name: uses, type: text, read_only: true, no_copy: true, label: Lineage, description: "The records and fields it reads, linked records' among them"}
     - {name: columns, type: text, read_only: true, no_copy: true, description: "Its columns when it was certified: what a warehouse loads"}

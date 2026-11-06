@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+Rebuilt with Ferrum-Frontend a64416a: a new record's box whose default is 1 shows ticked, as it is saved. An action's dialog says every refusal, the errors on what the action made (another record's rows) among them, and an action with parameters and a confirmation asks once. A metric's and a dataset's definition is built on its page with Studio's report builder (what it is about, its columns or groupings and measures across linked records, filters, the period and sort), the first rows it gives shown beside it, or written as JSON as before: its field says `widget: studio_query`, which needs Ferrum with field widgets.
+
 ## 0.3.1
 
 Rebuilt with Ferrum-Frontend a76295e: its pages show times on a person's own clock when they chose one on their Account page, while today and due dates stay on the workspace's day.
