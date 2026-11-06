@@ -1,20 +1,26 @@
-//! Governed analytics (FERRUM-ECOSYSTEM-010) on Studio: metrics defined once, certified by a
-//! steward, kept under change control with their lineage, read with each person's own rights, and
-//! a business glossary.
+//! Governed analytics (FERRUM-ECOSYSTEM-010) on Studio: metrics and datasets defined once, certified
+//! by a steward, kept under change control with their lineage, read with each person's own rights,
+//! loaded into a warehouse, and a business glossary.
 //!
 //! * `metric`: a definition of one measure checked against the records and its author's rights;
 //!   certification by a steward who does not own it, undone by a change of definition; values
 //!   read with the reader's rights; snapshots kept; deprecation pointing at what replaces it.
-//! * `site`: `/api/app/metrics/value`, a metric's value for whoever asks.
+//! * `dataset`: a table defined as a Studio query across linked records, governed as a metric is,
+//!   its columns kept when it is certified.
+//! * `warehouse`: a dataset's rows as CSV or JSON lines, and metrics' kept values since a time, for
+//!   a warehouse to load with an API key's rights.
+//! * `site`: `/api/app/metrics/value`, a metric's value for whoever asks, and the warehouse feed.
 //! * `delivery`: certified metrics delivered to whoever follows them, daily, weekly or monthly,
 //!   read with their own rights and kept as values.
 //!
 //! This app's own design; no code was copied (docs/PROVENANCE.md). Hooks are registered per entity,
 //! so a workspace without the `metrics` package never runs them.
 
+mod dataset;
 mod delivery;
 mod metric;
 mod site;
+mod warehouse;
 
 use ferrum_domain::reports::ReportSource;
 use ferrum_kernel::{Doc, Error, HookRegistry, Kernel, Result};
@@ -35,7 +41,10 @@ pub fn packages() -> std::result::Result<Vec<ferrum_meta::Package>, ferrum_meta:
 
 /// Registers this app's document hooks, and its endpoint.
 pub fn register(hooks: &mut HookRegistry) {
-    hooks.register("Metric", Arc::new(metric::MetricHook)).register("MetricSubscription", Arc::new(delivery::SubscriptionHook));
+    hooks
+        .register("Metric", Arc::new(metric::MetricHook))
+        .register("Dataset", Arc::new(dataset::DatasetHook))
+        .register("MetricSubscription", Arc::new(delivery::SubscriptionHook));
     hooks.add_site("metrics", Arc::new(site::MetricsSite));
 }
 

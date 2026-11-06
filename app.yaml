@@ -1,8 +1,8 @@
 id: metrics
 name: Metrics
-version: 0.2.2
+version: 0.3.0
 publisher: cbferrum
-summary: "Metrics defined once on Studio, certified by a steward, kept under change control with their lineage, read with each person's own rights, delivered to who follows them, and a glossary"
+summary: "Metrics and datasets defined once on Studio, certified by a steward, kept under change control with their lineage, read with each person's own rights, loaded into a warehouse, and a glossary"
 description: README.md
 categories: [analytics]
 license: AGPL-3.0-only

@@ -3,7 +3,8 @@
 //! Steward who does not own it certifies it, which fixes its definition: changing the definition
 //! puts it back in draft. Whoever reads it gets its value with their own rights to the records it
 //! counts, so two people may read two numbers from one definition. A deprecated metric names what
-//! replaces it, and is read no more.
+//! replaces it, and is read no more. Datasets (`dataset`) are governed the same way, by the same
+//! helpers here.
 
 use crate::obj;
 use async_trait::async_trait;
@@ -14,17 +15,22 @@ use ferrum_studio::spec::Spec;
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-/// A metric's definition, as a Studio query of one measure.
-pub(crate) fn spec_of(doc: &Doc) -> Result<Spec> {
+/// A record's definition, as a Studio query.
+pub(crate) fn parse_spec(doc: &Doc) -> Result<Spec> {
     let raw = doc.get("definition").cloned().unwrap_or(Value::Null);
     let raw = match raw {
         Value::String(s) => serde_json::from_str(&s).map_err(|e| Error::field("definition", format!("is not a Studio query: {e}")))?,
         v => v,
     };
-    let spec: Spec = serde_json::from_value(raw).map_err(|e| Error::field("definition", format!("is not a Studio query: {e}")))?;
+    serde_json::from_value(raw).map_err(|e| Error::field("definition", format!("is not a Studio query: {e}")))
+}
+
+/// A metric's definition, as a Studio query of one measure.
+pub(crate) fn spec_of(doc: &Doc) -> Result<Spec> {
+    let spec = parse_spec(doc)?;
     if spec.measures.len() != 1 || !spec.group_by.is_empty() || spec.pivot.is_some() || spec.time_series.is_some() {
         return Err(Error::field("definition", "a metric is one measure, ungrouped"));
     }
@@ -36,18 +42,93 @@ pub(crate) fn fingerprint(spec: &Spec) -> String {
     hex::encode(Sha256::digest(serde_json::to_vec(spec).unwrap_or_default()))
 }
 
-/// What a query reads: its record and the fields its measure and filters name.
-pub(crate) fn lineage(spec: &Spec) -> String {
-    let mut fields = BTreeSet::new();
-    for m in &spec.measures {
-        if let Some(f) = &m.field {
-            fields.insert(f.clone());
+/// What a query reads: its record's fields, then each linked record's (or child table's) fields
+/// under the record it reaches by which field: "SalesInvoice: grand_total; Customer (by customer):
+/// customer_group". `target` names the record a field of the query's record reaches.
+pub(crate) fn lineage(spec: &Spec, target: impl Fn(&str) -> Option<String>) -> String {
+    let mut paths = BTreeSet::new();
+    paths.extend(spec.measures.iter().filter_map(|m| m.field.clone()));
+    paths.extend(spec.fields.iter().map(|f| f.field.clone()));
+    paths.extend(spec.group_by.iter().map(|g| g.field.clone()));
+    paths.extend(spec.pivot.iter().map(|p| p.field.clone()));
+    paths.extend(spec.time_series.iter().map(|t| t.field.clone()));
+    paths.extend(spec.date_range.iter().map(|d| d.field.clone()));
+    if let Ok(filters) = ferrum_kernel::query::parse_filters(&spec.filters) {
+        paths.extend(filters.into_iter().map(|f| f.field));
+    }
+    let (mut own, mut reached) = (BTreeSet::new(), BTreeMap::<String, BTreeSet<String>>::new());
+    for p in paths {
+        match p.split_once('.') {
+            Some((via, rest)) => {
+                let record = target(via).map_or_else(|| format!("by {via}"), |t| format!("{t} (by {via})"));
+                reached.entry(record).or_default().insert(rest.to_string());
+            }
+            None => {
+                own.insert(p);
+            }
         }
     }
-    if let Ok(filters) = ferrum_kernel::query::parse_filters(&spec.filters) {
-        fields.extend(filters.into_iter().map(|f| f.field));
+    let list = |s: BTreeSet<String>| s.into_iter().collect::<Vec<_>>().join(", ");
+    let mut out = if own.is_empty() { spec.entity.clone() } else { format!("{}: {}", spec.entity, list(own)) };
+    for (record, fields) in reached {
+        out = format!("{out}; {record}: {}", list(fields));
     }
-    if fields.is_empty() { spec.entity.clone() } else { format!("{}: {}", spec.entity, fields.into_iter().collect::<Vec<_>>().join(", ")) }
+    out
+}
+
+/// The record a field of `entity` reaches, by link or as a child table, in `ctx`'s schema.
+pub(crate) fn reached(ctx: &Ctx, entity: &str, field: &str) -> Option<String> {
+    let f = ctx.schema.entity(entity)?.field(field)?;
+    f.to.clone().or_else(|| f.of.clone())
+}
+
+/// Whoever certifies and deprecates: a Data Steward, or an administrator.
+fn steward(ctx: &Ctx) -> bool {
+    ctx.is_admin || ctx.roles.iter().any(|r| r == "Data Steward")
+}
+
+/// A certified definition that changed is a draft again, to be certified anew.
+pub(crate) fn redraft(doc: &mut Doc, hash: &str, also: &[&str]) {
+    if s(doc, "status") == Some("Certified") && s(doc, "certified_hash") != Some(hash) {
+        doc.insert("status".into(), json!("Draft"));
+        for k in ["certified_by", "certified_at", "certified_hash"].iter().chain(also) {
+            doc.insert((*k).into(), Value::Null);
+        }
+    }
+}
+
+/// `certify` on a metric or a dataset: by a steward who does not own it, fixing the definition's
+/// fingerprint `hash`, with `more` kept beside it.
+pub(crate) async fn certify(hc: &mut HookCtx<'_>, entity: &str, doc: &Doc, hash: String, more: Value) -> Result<Value> {
+    let what = entity.to_lowercase();
+    if !steward(hc.ctx) {
+        return Err(Error::Forbidden(format!("a Data Steward certifies a {what}")));
+    }
+    if s(doc, "owner").is_some_and(|o| o.eq_ignore_ascii_case(&hc.ctx.email)) {
+        return Err(Error::Forbidden(format!("a {what} is certified by someone other than its owner")));
+    }
+    let record = id(doc, "id").ok_or_else(|| Error::internal("a record without an id"))?;
+    let mut values = json!({"status": "Certified", "certified_by": hc.ctx.email, "certified_at": Utc::now().to_rfc3339(), "certified_hash": hash});
+    if let (Value::Object(v), Value::Object(m)) = (&mut values, more) {
+        v.extend(m);
+    }
+    hc.kernel.set_values_tx(&elevated(hc.ctx), hc.tx, entity, record, obj(values)).await?;
+    Ok(json!({"status": "Certified"}))
+}
+
+/// `deprecate` on a metric or a dataset: by a steward, naming what replaces it, never itself.
+pub(crate) async fn deprecate(hc: &mut HookCtx<'_>, entity: &str, doc: &Doc, params: &Value) -> Result<Value> {
+    if !steward(hc.ctx) {
+        return Err(Error::Forbidden(format!("a Data Steward deprecates a {}", entity.to_lowercase())));
+    }
+    let record = id(doc, "id").ok_or_else(|| Error::internal("a record without an id"))?;
+    let replaced: Option<Uuid> = params.get("replaced_by").and_then(Value::as_str).and_then(|v| v.parse().ok());
+    if replaced == Some(record) {
+        return Err(Error::field("replaced_by", format!("a {} does not replace itself", entity.to_lowercase())));
+    }
+    let values = json!({"status": "Deprecated", "replaced_by": replaced.map(|r| r.to_string())});
+    hc.kernel.set_values_tx(&elevated(hc.ctx), hc.tx, entity, record, obj(values)).await?;
+    Ok(json!({"status": "Deprecated"}))
 }
 
 /// The metric's value for `ctx`, with its rights to the records the query counts.
@@ -80,14 +161,8 @@ impl DocHook for MetricHook {
             doc.insert("owner".into(), json!(hc.ctx.email.to_lowercase()));
         }
         let Ok(spec) = spec_of(doc) else { return Ok(()) };
-        doc.insert("uses".into(), json!(lineage(&spec)));
-        // A certified definition that changed is a draft again, to be certified anew.
-        if s(doc, "status") == Some("Certified") && s(doc, "certified_hash") != Some(fingerprint(&spec).as_str()) {
-            doc.insert("status".into(), json!("Draft"));
-            for k in ["certified_by", "certified_at", "certified_hash"] {
-                doc.insert(k.into(), Value::Null);
-            }
-        }
+        doc.insert("uses".into(), json!(lineage(&spec, |f| reached(hc.ctx, &spec.entity, f))));
+        redraft(doc, &fingerprint(&spec), &[]);
         Ok(())
     }
 
@@ -101,40 +176,9 @@ impl DocHook for MetricHook {
     async fn action(&self, hc: &mut HookCtx<'_>, name: &str, doc: &Doc, params: &Value) -> Result<Option<Value>> {
         let metric = id(doc, "id").ok_or_else(|| Error::internal("a metric without an id"))?;
         let system = elevated(hc.ctx);
-        let steward = hc.ctx.is_admin || hc.ctx.roles.iter().any(|r| r == "Data Steward");
         match name {
-            "certify" => {
-                if !steward {
-                    return Err(Error::Forbidden("a Data Steward certifies a metric".into()));
-                }
-                if s(doc, "owner").is_some_and(|o| o.eq_ignore_ascii_case(&hc.ctx.email)) {
-                    return Err(Error::Forbidden("a metric is certified by someone other than its owner".into()));
-                }
-                let hash = fingerprint(&spec_of(doc)?);
-                hc.kernel
-                    .set_values_tx(
-                        &system,
-                        hc.tx,
-                        "Metric",
-                        metric,
-                        obj(json!({"status": "Certified", "certified_by": hc.ctx.email, "certified_at": Utc::now().to_rfc3339(), "certified_hash": hash})),
-                    )
-                    .await?;
-                Ok(Some(json!({"status": "Certified"})))
-            }
-            "deprecate" => {
-                if !steward {
-                    return Err(Error::Forbidden("a Data Steward deprecates a metric".into()));
-                }
-                let replaced: Option<Uuid> = params.get("replaced_by").and_then(Value::as_str).and_then(|v| v.parse().ok());
-                if replaced == Some(metric) {
-                    return Err(Error::field("replaced_by", "a metric does not replace itself"));
-                }
-                hc.kernel
-                    .set_values_tx(&system, hc.tx, "Metric", metric, obj(json!({"status": "Deprecated", "replaced_by": replaced.map(|r| r.to_string())})))
-                    .await?;
-                Ok(Some(json!({"status": "Deprecated"})))
-            }
+            "certify" => certify(hc, "Metric", doc, fingerprint(&spec_of(doc)?), json!({})).await.map(Some),
+            "deprecate" => deprecate(hc, "Metric", doc, params).await.map(Some),
             "snapshot" => {
                 let v = value(hc.kernel, hc.ctx, doc).await?;
                 hc.kernel
@@ -162,11 +206,17 @@ mod tests {
         let doc = |v: Value| v.as_object().cloned().unwrap();
         let ok = doc(json!({"definition": {"entity": "Customer", "filters": [["customer_type", "eq", "Company"]], "measures": [{"fn": "count"}]}}));
         let spec = spec_of(&ok).unwrap();
-        assert_eq!(lineage(&spec), "Customer: customer_type");
+        assert_eq!(lineage(&spec, |_| None), "Customer: customer_type");
         let summed = doc(json!({"definition": {"entity": "SalesInvoice", "filters": {"status": "Paid"}, "measures": [{"fn": "sum", "field": "grand_total"}]}}));
-        assert_eq!(lineage(&spec_of(&summed).unwrap()), "SalesInvoice: grand_total, status");
+        assert_eq!(lineage(&spec_of(&summed).unwrap(), |_| None), "SalesInvoice: grand_total, status");
         let pair = doc(json!({"definition": {"entity": "Customer", "filters": [["customer_group", "Retail"]], "measures": [{"fn": "count"}]}}));
-        assert_eq!(lineage(&spec_of(&pair).unwrap()), "Customer: customer_group");
+        assert_eq!(lineage(&spec_of(&pair).unwrap(), |_| None), "Customer: customer_group");
+        // Linked records' fields, under the record each link reaches.
+        let joined = parse_spec(&doc(json!({"definition": {"entity": "SalesInvoice", "filters": [["customer.customer_group", "eq", "Retail"]],
+            "group_by": [{"field": "customer.territory"}, {"field": "posting_date"}], "measures": [{"fn": "sum", "field": "grand_total"}]}})))
+        .unwrap();
+        let target = |f: &str| (f == "customer").then(|| "Customer".to_string());
+        assert_eq!(lineage(&joined, target), "SalesInvoice: grand_total, posting_date; Customer (by customer): customer_group, territory");
         let two = doc(json!({"definition": {"entity": "Customer", "measures": [{"fn": "count"}, {"fn": "count"}]}}));
         assert!(spec_of(&two).is_err());
         let grouped = doc(json!({"definition": {"entity": "Customer", "group_by": [{"field": "customer_type"}], "measures": [{"fn": "count"}]}}));

@@ -1,17 +1,18 @@
 # Metrics
 
-Governed metrics for [Ferrum](https://github.com/CBFerrum/Ferrum), on Studio:
+Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), on Studio:
 - a metric defined once, as a query of one measure, with its lineage;
+- a dataset defined once, as a table across linked records;
 - certified by a steward who does not own it, and kept under change control;
-- read by everyone with their own rights to the records it counts;
+- read by everyone with their own rights to the records it counts, and loaded into a warehouse;
 - a glossary of the words the business uses.
 
 | | |
 |---|---|
 | 📊 App | `metrics`, native, in the server |
 | 🧩 Package | `metrics` |
-| 🖥️ Interface | its own, at `/kpis/`: the certified metrics by domain, each with its value for the viewer |
-| 🔌 Endpoint | `GET /api/app/metrics/value?metric=<name>` |
+| 🖥️ Interface | its own, at `/kpis/`: the certified metrics by domain, each with its value for the viewer, and the certified datasets with their addresses for a warehouse |
+| 🔌 Endpoints | `GET /api/app/metrics/value?metric=<name>`; the warehouse feed `GET /api/app/metrics/dataset?name=<name>&format=csv\|ndjson` and `GET /api/app/metrics/values?since=<time>` |
 | 🔐 Roles | Metric Author, Data Steward, Metric Reader |
 | 📜 Licence | AGPL-3.0-only |
 
@@ -20,8 +21,19 @@ Governed metrics for [Ferrum](https://github.com/CBFerrum/Ferrum), on Studio:
 - **Defined once.** A metric is a Studio query of exactly one measure, ungrouped. It is checked when
   saved: a query that does not run against the records, or names a field that is not there, is
   refused.
-- **Lineage.** Each metric records the record and the fields it reads, worked out from its
-  definition, never typed in.
+- **Lineage.** Each metric and dataset records the record and the fields it reads, and each linked
+  record's by the field that reaches it, worked out from its definition, never typed in.
+- **Datasets.** A dataset is a table defined once as a Studio query: record fields, or groupings and
+  measures, reaching linked records (`customer_group.group_name`). Its columns stay the same
+  whatever its rows (no pivot or comparison), and certification keeps them. It is governed as a
+  metric is: certified by a steward who does not own it, back in draft when its definition
+  changes, deprecated naming what replaces it.
+- **Into a warehouse.** A warehouse, or any loader of CSV or JSON lines over HTTPS, loads a
+  certified dataset from `/api/app/metrics/dataset?name=…&format=csv|ndjson` with an API key, and
+  gets the rows that key's person may read, up to 10,000. The definition's fingerprint
+  (`x-ferrum-dataset-hash`) tells a load the definition changed. `/api/app/metrics/values?since=…`
+  gives certified metrics' kept values after a time, oldest first, without who read them, and
+  `x-ferrum-next-since` says where the next load starts. A draft is tried by its owner only.
 - **Certified by someone else.** A Data Steward certifies a metric, and never one they own.
   Certification fixes the definition: a changed definition puts the metric back in draft until it is
   certified again. Its description and other words may change freely.
@@ -39,13 +51,13 @@ Governed metrics for [Ferrum](https://github.com/CBFerrum/Ferrum), on Studio:
   tells them the way they chose for "Metrics you follow". A metric deprecated since is said so
   once, with what replaces it, and is no longer delivered. One back in draft waits until it is
   certified again. Nobody follows for someone else, and followers see only their own.
-- **Personal data.** Requests reach who owns, certifies, reads and follows a metric, and who keeps
-  a term.
+- **Personal data.** Requests reach who owns, certifies, reads and follows a metric, who owns and
+  certifies a dataset, and who keeps a term.
 
 ## Develop
 
 ```bash
-cargo test                       # needs FERRUM_METRICS_TEST_DATABASE_URL's database
+cargo test                       # needs FERRUM_METRICS_TEST_DATABASE_URL's and FERRUM_METRICS_DATASETS_TEST_DATABASE_URL's databases
 cd ui && npm run build && npm run check
 ```
 
@@ -58,17 +70,28 @@ cd ui && npm run build && npm run check
 - deprecation pointing at the replacement;
 - who may do what.
 
+`tests/datasets_it.rs` walks a dataset across customers and their groups:
+- definitions refused for a pivot, for no columns, and when they do not run;
+- its lineage naming the customer group it reaches;
+- tried in draft by its owner only; certified by a steward, keeping its columns;
+- loaded as JSON lines and CSV by a director and two reps, each with their own rights;
+- a changed definition back to draft; deprecation naming what to load instead;
+- metrics' kept values loaded since a time, a reader loading her own.
+
 ## Not yet
 
 - Metrics over time (a series), and targets with alerts when a value crosses them.
-- Metrics built from other metrics (ratios), and a semantic layer joining records.
+- Metrics built from other metrics (ratios). Datasets reach linked records along their links (the
+  join graph Studio follows); there is no free join between unrelated records.
+- Pushing to a warehouse: it pulls (with an API key), up to 10,000 rows of a dataset a load, and
+  datasets are loaded whole each time; only metric values load from where the last load stopped.
 - Values kept on a schedule for no one in particular: they are kept as each follower reads them.
-- Lineage beyond one record: the fields a linked record contributes.
 
 ## Changelog
 
 | Version | Highlights |
 |---|---|
+| **0.3.0** | Governed datasets across linked records, certified with their columns; the warehouse feed of datasets as CSV or JSON lines and of metrics' values since a time; lineage naming linked records. |
 | **0.2.2** | Rebuilt with Ferrum-Frontend 24c3951: times on the workspace's clock; drafts headed as drafts. |
 | **0.2.1** | Rebuilt with Ferrum-Frontend bb60115: empty numbers read as the server reads them; settings open as their record. |
 | **0.2.0** | Certified metrics delivered to who follows them, read with their own rights, daily, weekly or monthly; personal data declared. |
