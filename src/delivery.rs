@@ -8,7 +8,7 @@ use crate::metric::value;
 use crate::obj;
 use async_trait::async_trait;
 use chrono::{NaiveDate, Utc};
-use ferrum_domain::util::{id, money, s};
+use ferrum_domain::util::{elevated, id, money, s};
 use ferrum_kernel::{Ctx, Doc, DocHook, Error, HookCtx, Kernel, Result, Tx, notify};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -100,8 +100,9 @@ async fn deliver_one(k: &Kernel, ctx: &Ctx, tx: &mut Tx, metric_id: Uuid, follow
     }
     let reader = k.load_ctx(ctx.tenant, user, None, "metrics.digest".into()).await?;
     let v = value(k, &reader, &metric).await?;
+    // Kept as the follower's own value, as one they record themselves is.
     k.insert_tx(
-        ctx,
+        &elevated(&reader),
         tx,
         "MetricSnapshot",
         obj(json!({"metric": metric_id.to_string(), "value": money(v), "read_by": follower, "read_at": Utc::now().to_rfc3339(),
