@@ -1,6 +1,6 @@
 id: metrics
 name: Metrics
-version: 0.4.3
+version: 0.4.4
 publisher: cbferrum
 summary: "Metrics and datasets defined once on Studio, certified by a steward, kept under change control with their lineage, read with each person's own rights, loaded into a warehouse, and a glossary"
 description: README.md
@@ -33,3 +33,15 @@ contributes:
   # chooses how it reaches them.
   shell.notification:
     - {id: digest, label: Metrics you follow, default: [inapp]}
+  # What the assistant should know in Metrics's pages, and what it suggests asking there.
+  shell.assistant:
+    - id: metrics
+      title: "Metrics"
+      instructions: >-
+        A Metric or a Dataset is defined once and is Draft, Certified by its steward, or Deprecated. Prefer certified
+        ones, and say so when a figure comes from one that is not. Reading a metric applies the person's own rights to
+        its records, so two people may see different figures. BusinessTerm is the glossary.
+      suggestions:
+        - "Which metrics are certified?"
+        - "What does a term in our glossary mean?"
+        - "What was monthly revenue over the last six months?"
