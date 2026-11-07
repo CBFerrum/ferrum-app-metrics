@@ -148,7 +148,7 @@ async fn scenario() {
         k.insert(&author, "Dataset", obj(set("Pivoted", json!({"entity": "Customer", "pivot": {"field": "customer_type"}, "measures": [{"fn": "count"}]}))))
             .await,
         "invalid",
-        "no pivot or comparison",
+        "its pivot names its values",
     );
     refused(k.insert(&author, "Dataset", obj(set("Nothing", json!({"entity": "Customer"})))).await, "invalid", "names its columns");
     refused(
@@ -216,6 +216,18 @@ async fn scenario() {
     refused(load(&director, "csv").await, "invalid", "deprecated: load Customers instead");
     let (body, _) = feed(&k, &director, "dataset", json!({"name": "Customers", "format": "ndjson"})).await.unwrap();
     assert_eq!(body.lines().count(), 4, "a table of records, each a row");
+
+    // ───────────── a pivot over the values it names, certified as any other ─────────────
+    let by_type = json!({"entity": "Customer", "group_by": [{"field": "customer_group.group_name", "label": "Group"}],
+                         "pivot": {"field": "customer_type", "values": ["Company", "Individual"]}, "measures": [{"fn": "count"}]});
+    let p = uid(&k.insert(&author, "Dataset", obj(set("Customers by group and type", by_type))).await.expect("a pivot over named values")["id"]);
+    k.run_action(&steward, "Dataset", p, "certify", Value::Null).await.expect("certified");
+    let kept = k.get(&a, "Dataset", p, false).await.unwrap()["columns"].as_str().unwrap().to_string();
+    assert_eq!(kept.lines().count(), 4, "the group, a column for each value named and the total: {kept}");
+    let (csv, _) = feed(&k, &director, "dataset", json!({"name": "Customers by group and type", "format": "csv"})).await.unwrap();
+    let mut lines: Vec<&str> = csv.split("\r\n").filter(|l| !l.is_empty()).skip(1).collect();
+    lines.sort();
+    assert_eq!(lines, ["Retail,1,0,1", "Wholesale,3,0,3"], "no one is an Individual, and the column is there: {csv}");
 
     // ───────────── metrics' values since a time ─────────────
     let count = json!({"metric_name": "Customers counted", "definition": {"entity": "Customer", "measures": [{"fn": "count"}]}});
