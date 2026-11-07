@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+A dataset may pivot, and compare (FERRUM-ECOSYSTEM-010). Its columns still stay the same whatever
+its rows, so certification keeps them as before:
+- **A pivot names its values** (`pivot.values`, which needs Ferrum with named pivot values): one
+  column for each, in that order, whatever the records hold, the column of a value no record has
+  kept; the totals count every value. A pivot whose columns come from its rows is still refused.
+- **A comparison** adds each measure's previous period (the period before, or the year before)
+  beside it, as a Studio query's does.
+
 ## 0.3.3
 
 Rebuilt with Ferrum-Frontend 63280d3: right to left, its pages mirror as they read (icons that point along the line, margins and alignment by the line's start and end, arrow keys along it), and the records pages' words are in Arabic and Hindi.
