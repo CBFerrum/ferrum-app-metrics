@@ -4,7 +4,7 @@
 
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { api, docPath, t } from "@ferrum/client";
+import { api, docPath, t, isolate } from "@ferrum/client";
 import { ErrorState, PageLoading, useShellTitle } from "@ferrum/kit";
 
 export interface Row {
@@ -31,7 +31,7 @@ export function byDomain(list: Row[]): [string, Row[]][] {
 }
 
 export function Home() {
-  useShellTitle("Metrics");
+  useShellTitle(t("Metrics"));
   const q = useQuery({ queryKey: ["metrics", "certified"], queryFn: () => rows("Metric", [["status", "eq", "Certified"]], { sort: "metric_name asc" }) });
   const sets = useQuery({ queryKey: ["metrics", "datasets"], queryFn: () => rows("Dataset", [["status", "eq", "Certified"]], { sort: "dataset_name asc" }) });
   const values = useQueries({
@@ -56,15 +56,15 @@ export function Home() {
       )}
       {byDomain(q.data).map(([domain, list]) => (
         <section key={domain} className="card card-pad stack" aria-label={domain}>
-          <h3>{domain}</h3>
+          <h3>{isolate(domain)}</h3>
           <div className="np-columns">
             {list.map((m) => (
               <Link key={m.id} className="card card-pad stack" to={`/e/Metric/${m.id}`}>
-                <strong>{String(m.metric_name)}</strong>
+                <strong>{isolate(String(m.metric_name))}</strong>
                 <span style={{ fontSize: 28 }}>
-                  {valueOf.get(m.id) ?? "…"} {String(m.unit ?? "")}
+                  {valueOf.get(m.id) ?? "…"} {isolate(String(m.unit ?? ""))}
                 </span>
-                <span className="faint">{String(m.uses ?? "")}</span>
+                <span className="faint">{isolate(String(m.uses ?? ""))}</span>
               </Link>
             ))}
           </div>
@@ -80,16 +80,16 @@ export function Home() {
           {(sets.data ?? []).map((d) => (
             <li key={d.id} className="stack" style={{ gap: 2 }}>
               <span>
-                <Link to={`/e/Dataset/${d.id}`}>{String(d.dataset_name)}</Link> ·{" "}
+                <Link to={`/e/Dataset/${d.id}`}>{isolate(String(d.dataset_name))}</Link> ·{isolate(" ")}
                 <a href={loadUrl(String(d.dataset_name), "csv")} download>
                   {t("CSV")}
-                </a>{" "}
-                ·{" "}
+                </a>{isolate(" ")}
+                ·{isolate(" ")}
                 <a href={loadUrl(String(d.dataset_name), "ndjson")} download>
                   {t("JSON lines")}
                 </a>
               </span>
-              <span className="faint">{String(d.uses ?? "")}</span>
+              <span className="faint">{isolate(String(d.uses ?? ""))}</span>
             </li>
           ))}
         </ul>
