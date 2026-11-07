@@ -25,7 +25,8 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
   record's by the field that reaches it, worked out from its definition, never typed in.
 - **Datasets.** A dataset is a table defined once as a Studio query: record fields, or groupings and
   measures, reaching linked records (`customer_group.group_name`). Its columns stay the same
-  whatever its rows (no pivot or comparison), and certification keeps them. It is governed as a
+  whatever its rows, and certification keeps them: a pivot names its values (one column each,
+  whatever the records hold), and a comparison adds each measure's period before. It is governed as a
   metric is: certified by a steward who does not own it, back in draft when its definition
   changes, deprecated naming what replaces it.
 - **Into a warehouse.** A warehouse, or any loader of CSV or JSON lines over HTTPS, loads a
@@ -71,11 +72,14 @@ cd ui && npm run build && npm run check
 - who may do what.
 
 `tests/datasets_it.rs` walks a dataset across customers and their groups:
-- definitions refused for a pivot, for no columns, and when they do not run;
+- definitions refused for a pivot that does not name its values, for no columns, and when they do
+  not run;
 - its lineage naming the customer group it reaches;
 - tried in draft by its owner only; certified by a steward, keeping its columns;
 - loaded as JSON lines and CSV by a director and two reps, each with their own rights;
 - a changed definition back to draft; deprecation naming what to load instead;
+- a pivot over the customer types it names, certified with a column for each and loaded, the
+  column of a type no one has kept;
 - metrics' kept values loaded since a time, a reader loading her own.
 
 ## Not yet
@@ -91,6 +95,7 @@ cd ui && npm run build && npm run check
 
 | Version | Highlights |
 |---|---|
+| **0.4.0** | A dataset pivots over the values it names, and compares a period with the one before; its columns still stay the same. |
 | **0.3.3** | Rebuilt with Ferrum-Frontend 63280d3: right to left, pages mirror; the records pages' words in Arabic and Hindi. |
 | **0.3.2** | Rebuilt with Ferrum-Frontend a64416a: a box whose default is 1 shows ticked; action dialogs say every refusal and ask once; definitions built with Studio's report builder. |
 | **0.3.1** | Rebuilt with Ferrum-Frontend a76295e: times on a person's own clock when they chose one. |

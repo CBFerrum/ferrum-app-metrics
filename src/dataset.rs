@@ -1,6 +1,6 @@
 //! Datasets. A dataset is a table defined once as a Studio query: its columns (record fields, or
-//! groupings and measures), filters and sort, reaching linked records and child tables by
-//! `link.field` when it needs them. Like a metric, it is checked against the records and its
+//! groupings and measures, spread across the values a pivot names or beside the period before),
+//! filters and sort, reaching linked records and child tables by `link.field` when it needs them. Like a metric, it is checked against the records and its
 //! author's rights when saved, and its lineage names every record and field it reads. A Data
 //! Steward who does not own it certifies it, which keeps its columns then (what a warehouse loads);
 //! changing it puts it back in draft. Each reader gets its rows with their own rights, in the app
@@ -13,11 +13,12 @@ use ferrum_kernel::{Ctx, Doc, DocHook, Error, HookCtx, Kernel, Result};
 use ferrum_studio::spec::{MAX_LIMIT, Spec};
 use serde_json::{Value, json};
 
-/// A dataset's definition: a Studio query whose columns are the same whatever its rows.
+/// A dataset's definition: a Studio query whose columns are the same whatever its rows. A pivot
+/// names its values, so they are its columns; a comparison adds each measure's previous period.
 pub(crate) fn dataset_spec(doc: &Doc) -> Result<Spec> {
     let spec = parse_spec(doc)?;
-    if spec.pivot.is_some() || spec.compare.is_some() {
-        return Err(Error::field("definition", "a dataset keeps the same columns whatever its rows: no pivot or comparison"));
+    if spec.pivot.as_ref().is_some_and(|p| p.values.is_empty()) {
+        return Err(Error::field("definition", "a dataset keeps the same columns whatever its rows: its pivot names its values (pivot.values)"));
     }
     if spec.fields.is_empty() && spec.group_by.is_empty() && spec.measures.is_empty() {
         return Err(Error::field("definition", "a dataset names its columns: record fields, or groupings and measures"));
@@ -104,7 +105,14 @@ mod tests {
         let table = doc(json!({"definition": {"entity": "Customer", "fields": [{"field": "customer_name"}, {"field": "customer_group"}]}}));
         assert!(dataset_spec(&table).is_ok());
         let pivoted = doc(json!({"definition": {"entity": "Customer", "pivot": {"field": "customer_type"}, "measures": [{"fn": "count"}]}}));
-        assert!(dataset_spec(&pivoted).is_err());
+        assert!(dataset_spec(&pivoted).is_err(), "columns from its rows");
+        let named = doc(
+            json!({"definition": {"entity": "Customer", "pivot": {"field": "customer_type", "values": ["Company", "Individual"]}, "measures": [{"fn": "count"}]}}),
+        );
+        assert!(dataset_spec(&named).is_ok());
+        let compared = doc(json!({"definition": {"entity": "SalesInvoice", "measures": [{"fn": "count"}], "compare": "previous_year",
+            "date_range": {"field": "posting_date", "from": "start_of_year", "to": "today"}}}));
+        assert!(dataset_spec(&compared).is_ok());
         assert!(dataset_spec(&doc(json!({"definition": {"entity": "Customer"}}))).is_err(), "no columns");
         let cols = [
             json!({"name": "territory", "label": "Territory", "type": "data"}),
