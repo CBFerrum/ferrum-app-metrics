@@ -4,7 +4,7 @@
 
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { api, docPath } from "@ferrum/client";
+import { api, docPath, t } from "@ferrum/client";
 import { ErrorState, PageLoading, useShellTitle } from "@ferrum/kit";
 
 export interface Row {
@@ -46,12 +46,12 @@ export function Home() {
   return (
     <div className="np-page">
       <header className="row" style={{ justifyContent: "space-between" }}>
-        <h2>Certified metrics</h2>
-        <Link to="/e/Metric/new">New metric</Link>
+        <h2>{t("Certified metrics")}</h2>
+        <Link to="/e/Metric/new">{t("New metric")}</Link>
       </header>
       {q.data.length === 0 && (
         <p className="faint">
-          No metric is certified yet. <Link to="/e/Metric">Metrics in draft</Link> wait for a Data Steward.
+          {t("No metric is certified yet.")} <Link to="/e/Metric">{t("Metrics in draft")}</Link> {t("wait for a Data Steward.")}
         </p>
       )}
       {byDomain(q.data).map(([domain, list]) => (
@@ -70,30 +70,30 @@ export function Home() {
           </div>
         </section>
       ))}
-      <section className="card card-pad stack" aria-label="Datasets">
+      <section className="card card-pad stack" aria-label={t("Datasets")}>
         <header className="row" style={{ justifyContent: "space-between" }}>
-          <h3>Certified datasets</h3>
-          <Link to="/e/Dataset/new">New dataset</Link>
+          <h3>{t("Certified datasets")}</h3>
+          <Link to="/e/Dataset/new">{t("New dataset")}</Link>
         </header>
-        {(sets.data ?? []).length === 0 && <p className="faint">No dataset is certified yet.</p>}
+        {(sets.data ?? []).length === 0 && <p className="faint">{t("No dataset is certified yet.")}</p>}
         <ul className="stack">
           {(sets.data ?? []).map((d) => (
             <li key={d.id} className="stack" style={{ gap: 2 }}>
               <span>
                 <Link to={`/e/Dataset/${d.id}`}>{String(d.dataset_name)}</Link> ·{" "}
                 <a href={loadUrl(String(d.dataset_name), "csv")} download>
-                  CSV
+                  {t("CSV")}
                 </a>{" "}
                 ·{" "}
                 <a href={loadUrl(String(d.dataset_name), "ndjson")} download>
-                  JSON lines
+                  {t("JSON lines")}
                 </a>
               </span>
               <span className="faint">{String(d.uses ?? "")}</span>
             </li>
           ))}
         </ul>
-        <p className="faint">A warehouse loads these addresses with an API key: it reads what that key's person may read.</p>
+        <p className="faint">{t("A warehouse loads these addresses with an API key: it reads what that key's person may read.")}</p>
       </section>
     </div>
   );
