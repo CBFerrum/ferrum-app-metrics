@@ -12,7 +12,7 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
 | 📊 App | `metrics`, native, in the server |
 | 🧩 Package | `metrics` |
 | 🖥️ Interface | its own, at `/kpis/`: the certified metrics by domain, each with its value for the viewer, and the certified datasets with their addresses for a warehouse |
-| 🔌 Endpoints | `GET /api/app/metrics/value?metric=<name>`, `series?metric=<name>&bucket=month&periods=12`, `impact?metric=<name>`; the warehouse feed `GET /api/app/metrics/dataset?name=<name>&format=csv\|ndjson` and `GET /api/app/metrics/values?since=<time>` |
+| 🔌 Endpoints | `GET /api/app/metrics/value?metric=<name>`, `series?metric=<name>&bucket=month&periods=12`, `impact?metric=<name>`; the warehouse feed `GET /api/app/metrics/dataset?name=<name>&format=csv\|ndjson` and `GET /api/app/metrics/values?since=<time>`; `POST /api/app/metrics/import/wren` |
 | 🔐 Roles | Metric Author, Data Steward, Metric Reader |
 | 📜 Licence | AGPL-3.0-only |
 
@@ -27,7 +27,25 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
   value, said so. `GET /api/app/metrics/impact?metric=<name>` lists the metrics a change reaches.
 - **Period by period.** `GET /api/app/metrics/series?metric=<name>&bucket=month&periods=12` gives its value
   for each period by its `series_by` date field, the current period marked partial; every value says when
-  it was worked out (`as_of`).
+  it was worked out (`as_of`). A series goes by day, week, month, quarter or year, or by the workspace's
+  fiscal quarters and years (`fiscal_quarter`, `fiscal_year`), which start in its fiscal start month.
+- **In one currency.** A metric that sums amounts in several currencies can read them in one (`convert_to`):
+  each row at the exchange rate valid on its own day (`rate_date_field`), the latest from that day or
+  before, direct or else the inverse of the opposite rate, as documents are converted. Products stay
+  exact and each total is rounded half to even (`round_to`, 2 places by default). The rule, the currency
+  and the rounding are part of what certification fixes, so changing any of them is a draft again. A row
+  in a currency without a rate by its day leaves the metric without a value, saying which rate to add,
+  never a total without that row; a read that would hold more currency-days than one read takes is
+  refused rather than cut short. Only sums convert, a formula keeps to one currency, and a currency on
+  child rows, which would count a document once per row, is refused when the metric is saved.
+- **From Wren.** `POST /api/app/metrics/import/wren` takes a Wren semantic model (MDL) and reviews each
+  cube measure against the metrics defined here: `new`, `same`, `duplicate` (another name already means
+  it), `conflict` (that name means something else, and stays so) or `unsupported`, with the reason. Only
+  one aggregate of one column is brought; a calculated column, a relationship, a view or any other
+  expression is refused rather than approximated. A model maps to a record by `map`, or by name. What a
+  reviewer accepts (a conflict only under another name) is created as drafts, all or none, with the
+  importer's rights, to be certified like any other. Wren's own row and column rules are not brought:
+  each reader's rights here decide, and the review says so.
 - **Lineage.** Each metric and dataset records the record and the fields it reads, and each linked
   record's by the field that reaches it, worked out from its definition, never typed in.
 - **Datasets.** A dataset is a table defined once as a Studio query: record fields, or groupings and
@@ -49,7 +67,10 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
   rights to the records it counts. Two sales reps and their director read three numbers from one
   definition, each the right one for them.
 - **Kept values.** A reader records a metric's value as they read it, with the definition's
-  fingerprint then. Readers see the values they kept; stewards see them all.
+  fingerprint then and what the metric meant (its query or formula, and how it converts), so a value
+  kept before a change still says what it counted. A kept value was read with its reader's rights, so
+  it is theirs alone: no author, steward or follower of the metric reads another person's. Administrators
+  see them all.
 - **Deprecation.** A steward deprecates a metric, naming what replaces it; it is read no more, and
   whoever asks is pointed at its replacement.
 - **Who sees what.** Metric Readers see certified metrics only. A draft is read only by its owner.
@@ -123,3 +144,10 @@ cd ui && npm run build && npm run check
 ## License
 
 AGPL-3.0-only. See [LICENSE](LICENSE).
+
+`tests/currency_it.rs` checks sales in four currencies against numbers worked out by hand: a rate on
+its own first day, the inverse of an opposite rate, a refund dated back across a fiscal year, ties
+rounded to the even digit, each reader's own sales, fiscal years and quarters from April, a sale with two
+matching lines counted once, lines at their sale's rate, a currency without a rate, and a kept value
+that still says what it meant after the rounding changed. `tests/wren_it.rs` brings in a Wren model with
+a revenue that conflicts with a certified one.

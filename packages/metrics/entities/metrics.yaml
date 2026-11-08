@@ -32,6 +32,10 @@
     - {name: definition, type: json, widget: studio_query, description: "A Studio query with exactly one measure. Or leave it empty and compose the metric of others"}
     - {name: formula, type: data, label: Composed Of, description: "Other metrics by name, in brackets: [Revenue] / [Orders]. Each part is read with the reader's own rights; certified after its parts"}
     - {name: series_by, type: data, label: Series By, description: "The date field a series of it goes by, month by month or week by week: posting_date"}
+    - {name: convert_to, type: link, to: Currency, label: Convert To, description: "Sum amounts in several currencies in this one, each row at the rate valid on its day. Leave it empty to sum them as they are"}
+    - {name: currency_field, type: data, label: Currency Field, description: "The field linking each row to its currency: currency"}
+    - {name: rate_date_field, type: data, label: Rate Date, description: "The date whose exchange rate converts each row: posting_date"}
+    - {name: round_to, type: int, label: Round To, default: 2, min: 0, max: 6, description: "Decimal places of each converted total, rounded half to even"}
     - {name: unit, type: data}
     - {name: terms, type: table, of: MetricTerm}
     - {name: uses, type: text, read_only: true, no_copy: true, label: Lineage, description: "The record and fields it reads"}
@@ -52,13 +56,15 @@
   kind: master
   module: metrics
   title_field: metric
-  description: A certified metric's value as one person read it, at a moment, kept.
+  owner_fields: [read_by]
+  description: A certified metric's value as one person read it, with their own rights, at a moment, kept with what the metric meant then. Seen by whoever read it.
   fields:
     - {name: metric, type: link, to: Metric, required: true, read_only: true, in_list: true, in_filter: true}
     - {name: value, type: decimal, read_only: true, in_list: true}
     - {name: read_by, type: email, read_only: true, in_list: true}
     - {name: read_at, type: datetime, read_only: true, in_list: true}
     - {name: certified_hash, type: data, read_only: true, hidden: true}
+    - {name: definition, type: json, read_only: true, label: Meant, description: "What the metric meant when this value was read: its query or formula, and how it converts"}
   list: {columns: [metric, value, read_by, read_at], sort: read_at desc}
 
 - name: MetricSubscription

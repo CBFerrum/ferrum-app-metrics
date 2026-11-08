@@ -235,7 +235,11 @@ async fn scenario() {
     k.run_action(&steward, "Metric", m, "certify", Value::Null).await.unwrap();
     k.run_action(&rep1, "Metric", m, "snapshot", Value::Null).await.unwrap();
     k.run_action(&director, "Metric", m, "snapshot", Value::Null).await.unwrap();
-    let (body, h) = feed(&k, &steward, "values", json!({})).await.expect("values");
+    // Each value was read with its reader's rights, so only its reader, or an administrator loading the
+    // whole history, gets it: a steward who kept none loads none.
+    let (body, _) = feed(&k, &steward, "values", json!({})).await.unwrap();
+    assert_eq!(body.lines().count(), 0, "not the director's count, nor the rep's");
+    let (body, h) = feed(&k, &a, "values", json!({})).await.expect("values");
     let kept: Vec<Value> = body.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(
         kept.iter().map(|v| (v["metric"].as_str().unwrap(), dec(&v["value"]))).collect::<Vec<_>>(),
@@ -244,7 +248,7 @@ async fn scenario() {
     assert!(kept.iter().all(|v| v.get("read_by").is_none()), "who read it does not leave");
     let first = kept[0]["read_at"].as_str().unwrap().to_string();
     assert_eq!(header(&h, "x-ferrum-next-since"), kept[1]["read_at"].as_str());
-    let (body, _) = feed(&k, &steward, "values", json!({"since": first})).await.unwrap();
+    let (body, _) = feed(&k, &a, "values", json!({"since": first})).await.unwrap();
     assert_eq!(body.lines().count(), 1, "only what came after");
     let (body, _) = feed(&k, &rep1, "values", json!({})).await.unwrap();
     assert_eq!(body.lines().count(), 1, "a reader loads her own");

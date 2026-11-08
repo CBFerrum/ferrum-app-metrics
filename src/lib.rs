@@ -12,6 +12,8 @@
 //! * `site`: `/api/app/metrics/value`, a metric's value for whoever asks, and the warehouse feed.
 //! * `delivery`: certified metrics delivered to whoever follows them, daily, weekly or monthly,
 //!   read with their own rights and kept as values.
+//! * `wren`: a Wren semantic model reviewed against the metrics defined here, its accepted measures
+//!   brought in as drafts; never a second authority, never an approximation.
 //!
 //! This app's own design; no code was copied (docs/PROVENANCE.md). Hooks are registered per entity,
 //! so a workspace without the `metrics` package never runs them.
@@ -21,6 +23,7 @@ mod delivery;
 mod metric;
 mod site;
 mod warehouse;
+mod wren;
 
 use ferrum_domain::reports::ReportSource;
 use ferrum_kernel::{Doc, Error, HookRegistry, Kernel, Result};
