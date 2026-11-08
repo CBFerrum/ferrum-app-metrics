@@ -255,5 +255,7 @@ async fn scenario(dir: PathBuf, listener: std::net::TcpListener) {
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
     refused(value(&k, &north, "Lake revenue").await, "cannot be reached");
+    let gone = format!("{:?}", value(&k, &north, "Lake revenue").await);
+    assert!(!gone.contains("127.0.0.1") && !gone.contains("http"), "the engine's address is not the reader's: {gone}");
     refused(value(&k, &north, "Revenue per customer").await, "cannot be reached");
 }

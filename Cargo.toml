@@ -21,6 +21,7 @@ rust_decimal = { version = "1.43", features = ["serde-with-str", "maths"] }
 serde_json = "1"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "uuid", "chrono", "rust_decimal", "json", "migrate", "macros"] }
 uuid = { version = "1.10", features = ["v4", "v7", "serde"] }
+tracing = "0.1"
 
 [dev-dependencies]
 # Its tests check that its interface is a release the platform takes.
