@@ -32,6 +32,13 @@ export function staleSources(read: Read | undefined): string[] {
   return [...new Set((read?.stale ?? []).map((s) => s.source).filter(Boolean))].sort();
 }
 
+/** Why `metric` has no value now, without the metric's own name, which its card already shows. */
+export function reasonOf(metric: string, error: unknown): string {
+  const said = error instanceof Error ? error.message : String(error);
+  const prefix = [`${metric} has no value now: `, `${metric} has no value for you: `, `${metric} has no value: `].find((p) => said.startsWith(p));
+  return prefix ? said.slice(prefix.length) : said;
+}
+
 /** Metrics by domain, domains in name order, "Other" last. */
 export function byDomain(list: Row[]): [string, Row[]][] {
   const out = new Map<string, Row[]>();
@@ -82,7 +89,7 @@ export function Home() {
                   </span>
                   {read?.isError && (
                     <span className="faint" role="status">
-                      {placed(t("No value now: {reason}"), { reason: isolate(read.error instanceof Error ? read.error.message : String(read.error)) })}
+                      {placed(t("No value now: {reason}"), { reason: isolate(reasonOf(String(m.metric_name), read.error)) })}
                     </span>
                   )}
                   {stale.length > 0 && (

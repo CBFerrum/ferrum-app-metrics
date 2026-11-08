@@ -243,6 +243,48 @@ async fn time_memory_and_rows_are_bounded() {
 }
 
 #[tokio::test]
+async fn a_dataset_that_cannot_be_read_says_so_without_its_files() {
+    let dir = lake("unreadable");
+    // Rows past the ones its columns' types are worked out from, with one total that is not a number.
+    let mut rows = String::from("id,region,owner,status,total,secret\n");
+    for i in 1..=1500 {
+        rows.push_str(&format!("{i},North,ann@x.test,Paid,{},a\n", if i == 1400 { "lots".to_string() } else { "1.00".to_string() }));
+    }
+    std::fs::write(dir.join("orders.csv"), rows).unwrap();
+    let e = engine(&dir, Limits::default());
+    let place = dir.to_string_lossy().to_string();
+    // The parser's own error carries the raw row, read before the reader's rules: none of it reaches the reader.
+    let south = vec![
+        Allowed {
+            name: "orders_lake".into(),
+            rows: vec![RowRule { column: "region".into(), values: vec!["South".into()], any_case: false }],
+            hide: vec!["secret".into()],
+        },
+        allow("regions_lake"),
+    ];
+    match e.query(&query("select sum(total) from orders", south)).await {
+        Err(r) => assert!(
+            r.status == 503
+                && r.message.contains("cannot be read now")
+                && !r.message.contains(&place)
+                && !r.message.contains("ann@x.test")
+                && !r.message.contains("lots"),
+            "{r}"
+        ),
+        Ok(a) => panic!("answered {a:?}"),
+    }
+    // A file it may not open at all.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("orders.csv"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let r = e.query(&query("select sum(total) from orders", everything())).await.expect_err("unreadable");
+        std::fs::set_permissions(dir.join("orders.csv"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(r.status == 503 && r.message.contains("cannot be read now") && !r.message.contains(&place), "{r}");
+    }
+}
+
+#[tokio::test]
 async fn answers_say_when_their_data_was_written() {
     let dir = lake("fresh");
     let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_767_323_045); // 2026-01-02T03:04:05Z
