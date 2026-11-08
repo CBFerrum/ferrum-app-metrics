@@ -42,9 +42,9 @@ It is stale when any part is, and has no value when any part has none.
   query is held to terms nested at most 100 deep (`a + b + c` is three deep) and at most 32 models read,
   counting each time one is read. A model's calculated columns and relationships are held to the same depth,
   and a semantic model holds at most 32 models, so the longest chain of relationships through it is planned in
-  moments.
-  A long list of values is fine. Each of the engine's threads has a 64 MiB stack, used only as deep as a query
-  goes, and DataFusion's own recursion grows its stack as it needs: no query can overflow it and take the
+  moments. A long list of values is fine.
+- **A stack overflowed.** Each of the engine's threads has a 64 MiB stack, used only as deep as a query goes,
+  and DataFusion's own recursion grows its stack as it needs, so no query can overflow one and take the
   process down.
 - **Too much.** Each query runs within the operator's limits. When one is exceeded, nothing is answered:
   - rows: the answer is cut and says so;
