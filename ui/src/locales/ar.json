@@ -10,6 +10,5 @@
   "New dataset": "مجموعة بيانات جديدة",
   "New metric": "مقياس جديد",
   "No dataset is certified yet.": "لم تُعتمد أي مجموعة بيانات بعد.",
-  "No metric is certified yet.": "لم يُعتمد أي مقياس بعد.",
-  "wait for a Data Steward.": "بانتظار أمين بيانات."
+  "No metric is certified yet. {p1} wait for a Data Steward.": "لم يُعتمد أي مقياس بعد. {p1} تنتظر أمين بيانات."
 }
