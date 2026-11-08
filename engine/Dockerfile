@@ -5,9 +5,12 @@
 FROM rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS build
 WORKDIR /src
 COPY . .
-RUN cargo build --release -p ferrum-metrics-engine
+RUN cargo build --release --locked -p ferrum-metrics-engine
 
 FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
+LABEL org.opencontainers.image.source="https://github.com/CBFerrum/ferrum-app-metrics" \
+      org.opencontainers.image.description="Metrics' engine for external sources (Wren on DataFusion)" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 RUN useradd --system --uid 10001 --no-create-home engine
 COPY --from=build /src/target/release/ferrum-metrics-engine /usr/local/bin/ferrum-metrics-engine
 USER 10001

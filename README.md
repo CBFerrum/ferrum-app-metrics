@@ -11,7 +11,7 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
 |---|---|
 | 📊 App | `metrics`, native, in the server |
 | 🧩 Package | `metrics` |
-| 🖥️ Interface | its own, at `/kpis/`: the certified metrics by domain, each with its value for the viewer, and the certified datasets with their addresses for a warehouse |
+| 🖥️ Interface | its own, at `/kpis/`: the certified metrics by domain, each with its value for the viewer (saying when it is stale, or why there is none now), and the certified datasets with their addresses for a warehouse |
 | 🔌 Endpoints | `GET /api/app/metrics/value?metric=<name>`, `series?metric=<name>&bucket=month&periods=12`, `impact?metric=<name>`; the warehouse feed `GET /api/app/metrics/dataset?name=<name>&format=csv\|ndjson` and `GET /api/app/metrics/values?since=<time>`; `POST /api/app/metrics/import/wren` |
 | 🔐 Roles | Metric Author, Data Steward, Metric Reader |
 | 🛰️ Service | `ferrum-metrics-engine` (`engine/`): external datasets through Wren on DataFusion, run beside the server ([docs/engine.md](docs/engine.md)) |
@@ -49,7 +49,9 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
     that filters its rows and leaves out those columns in its own scan, so no model, rename, calculated column
     or relationship reaches past them.
   - A query is one SELECT over the model's models. Anything else is refused, and so is what Wren cannot plan
-    exactly. Time, memory, rows and concurrency are bounded.
+    exactly. Time, memory, rows and concurrency are bounded, and so are how deep a query's terms nest, how
+    many models it reads and how many a semantic model holds, before anything is planned. A query's time holds
+    whether or not its work yields.
   - A value read from data older than its source allows says so (`stale`), as does anything composed of it.
   - The query is checked when the metric is saved, on its author's own view of the datasets, and must answer
     with one number. Certification fixes it as it fixes a query of the records.
@@ -139,6 +141,7 @@ cd ui && npm run build && npm run check
 
 | Version | Highlights |
 |---|---|
+| **0.7.1** | The KPI page says when a value is stale, and why a metric has no value now; the engine bounds how deep and wide a query is before planning it. |
 | **0.7.0** | Metrics read from external datasets through Metrics' engine (Wren on DataFusion), with each reader's rows and columns and fresh-or-stale said; External Sources. |
 | **0.6.0** | Currencies by the day's rate, fiscal series, kept values that keep their meaning and stay their readers', and Wren models reviewed into drafts. |
 | **0.5.0** | Composed metrics, series with the period not yet over marked partial, and impact. |
@@ -168,7 +171,8 @@ AGPL-3.0-only. See [LICENSE](LICENSE).
 hidden column refused to an author who cannot see it, a composed metric of an external metric and one of the
 records, fresh and stale, and the engine gone. `engine/tests/` checks the engine alone: Wren's models,
 relationships and calculated columns answered exactly; what has no exact meaning refused; the sandbox, the
-bounds and the token.
+bounds and the token; and a query as deep as one of the largest size can be, refused before it is planned,
+on a thread with the engine's own stack.
 
 `tests/currency_it.rs` checks sales in four currencies against numbers worked out by hand: a rate on
 its own first day, the inverse of an opposite rate, a refund dated back across a fiscal year, ties

@@ -38,9 +38,20 @@ It is stale when any part is, and has no value when any part has none.
   catalog or schema, or shares its name with a dataset.
 - **Wren's own row and column rules** (`rowLevelAccessControls`, `columnLevelAccessControl`) and its
   `dataSource`. These are taken out before a model runs: the rules are Ferrum's, and the data is read here.
+- **Too deep or too wide to plan quickly.** Planning cannot be stopped midway, so before anything is planned a
+  query is held to terms nested at most 100 deep (`a + b + c` is three deep) and at most 32 models read,
+  counting each time one is read. A model's calculated columns and relationships are held to the same depth,
+  and a semantic model holds at most 32 models, so the longest chain of relationships through it is planned in
+  moments. A long list of values is fine.
+- **A stack overflowed.** Each of the engine's threads has a 64 MiB stack, used only as deep as a query goes,
+  and DataFusion's own recursion grows its stack as it needs, so no query can overflow one and take the
+  process down.
 - **Too much.** Each query runs within the operator's limits. When one is exceeded, nothing is answered:
   - rows: the answer is cut and says so;
-  - time: the query is stopped (504);
+  - time: the caller is told so (504) once its wait for a turn and its time are up, whether or not the query's
+    work stops to yield. Each query runs as a task of its own, stopped at its next yield, and it keeps its turn
+    until it has stopped, so slow queries never hold more than the turns there are. A query that fails
+    unexpectedly is refused (500), and the engine goes on;
   - memory: a query needing more fails, since nothing spills to disk (422);
   - concurrency: past the queries allowed at once, a query waits its turn, then is told the engine is busy (503).
 
@@ -74,7 +85,11 @@ The configuration lists the datasets and the limits:
   and has no value when read, saying the engine is not set up.
 - **Health.** `GET /health` answers `{"ok": true, "datasets": n}` without a token. On SIGTERM the engine stops
   taking work and finishes what it holds.
-- **Build.** `docker build -f engine/Dockerfile .` from this repository, or `cargo build --release -p
+- **Image.** Published from main as `ghcr.io/cbferrum/ferrum-metrics-engine` (`latest` and `sha-<commit>`),
+  once CI has built it, run it read-only and unprivileged, asked it as Metrics does, and stopped it with
+  SIGTERM. Ferrum's `deploy/metrics-engine.yml` runs it beside the stack with Compose, and its
+  `deploy/k8s/metrics-engine` component runs two replicas on Kubernetes.
+- **Build.** `docker build -f engine/Dockerfile .` from this repository, or `cargo build --release --locked -p
   ferrum-metrics-engine`.
 
 ## Numbers and money
