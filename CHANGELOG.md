@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0
+
+Currencies, fiscal periods, kept values' meaning and owners, and Wren models (Ferrum's Logic Platform:
+FLC-SEM-001, -004, -008, -009, -010 and FLC-QUAL-005).
+
+- A metric summing amounts in several currencies can read them in one (`convert_to`, `currency_field`,
+  `rate_date_field`, `round_to`): each row at the rate valid on its day, the latest from that day or
+  before, direct or else inverse as documents take it, products exact, each total rounded half to even.
+  How it converts is certified with its definition. A missing rate is said, with the currency and the
+  day, never left out of a total; more currency-days than one read holds are refused, never cut short.
+- Series by fiscal quarter and fiscal year, from the workspace's fiscal start month.
+- A kept value keeps what the metric meant then (`definition`). Kept values are their readers' alone:
+  Metric Authors and Data Stewards no longer read everyone's, and the values feed gives a key the values
+  its own person kept. This is a narrowing of access.
+- `POST /api/app/metrics/import/wren` reviews a Wren model's measures against the metrics defined here
+  and creates what a reviewer accepts as drafts; conflicting definitions stay as they are, and what has no
+  exact meaning is refused with its reason.
+- The new fields' names, and those 0.5.0 added, in Arabic and Hindi (translated by the model, to be reviewed
+  by native speakers). Rebuilt with Ferrum-Frontend 48907d8.
+
 ## 0.5.0
 
 Composed metrics and series (Ferrum's Logic Platform, W6). A metric can be a formula over other metrics by name (`[Company terms] / [Company customers]`), worked out in exact decimals from each part's value for the person reading it, so two people read two numbers from one definition. A metric is never made of itself, even by way of others; a composed metric is certified after its parts; a part deprecated or uncertified leaves it without a value, said so, as does a division by zero, never a zero. `impact?metric=` lists what a change to a metric reaches. `series?metric=&bucket=month&periods=12` gives a metric period by period by its `series_by` date field (or period by period from its parts), the period not yet over marked partial. Values say when they were worked out (`as_of`).
