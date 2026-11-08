@@ -139,6 +139,7 @@ cd ui && npm run build && npm run check
 
 | Version | Highlights |
 |---|---|
+| **0.7.1** | The KPI page says when a value is stale, and why a metric has no value now. |
 | **0.7.0** | Metrics read from external datasets through Metrics' engine (Wren on DataFusion), with each reader's rows and columns and fresh-or-stale said; External Sources. |
 | **0.6.0** | Currencies by the day's rate, fiscal series, kept values that keep their meaning and stay their readers', and Wren models reviewed into drafts. |
 | **0.5.0** | Composed metrics, series with the period not yet over marked partial, and impact. |

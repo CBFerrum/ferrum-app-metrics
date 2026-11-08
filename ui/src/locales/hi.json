@@ -10,5 +10,7 @@
   "New dataset": "नया डेटासेट",
   "New metric": "नया मीट्रिक",
   "No dataset is certified yet.": "अभी कोई डेटासेट प्रमाणित नहीं है।",
-  "No metric is certified yet. {p1} wait for a Data Steward.": "अभी कोई मीट्रिक प्रमाणित नहीं। {p1} डेटा प्रबंधक की प्रतीक्षा करते हैं।"
+  "No metric is certified yet. {p1} wait for a Data Steward.": "अभी कोई मीट्रिक प्रमाणित नहीं। {p1} डेटा प्रबंधक की प्रतीक्षा करते हैं।",
+  "No value now: {reason}": "अभी कोई मान नहीं: {reason}",
+  "Read from data older than its source allows: {sources}": "ऐसे डेटा से पढ़ा गया जो उसके स्रोत की अनुमति से पुराना है: {sources}"
 }
