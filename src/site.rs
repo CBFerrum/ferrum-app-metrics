@@ -16,8 +16,9 @@ impl Site for MetricsSite {
     async fn handle(&self, k: &Kernel, req: SiteRequest) -> Result<SiteResponse> {
         let user = req.user.as_ref().ok_or_else(|| Error::Unauthorized("sign in first".into()))?;
         let param = |key: &str| req.query.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty());
-        match (req.method.as_str(), req.path.trim_matches('/')) {
-            ("GET", "value") => {}
+        let path = req.path.trim_matches('/').to_string();
+        match (req.method.as_str(), path.as_str()) {
+            ("GET", "value" | "series" | "impact") => {}
             ("GET", "dataset") => {
                 let name = param("name").ok_or_else(|| Error::field("name", "is required"))?;
                 return crate::warehouse::dataset(k, user, name, param("format").unwrap_or("csv")).await;
@@ -46,9 +47,28 @@ impl Site for MetricsSite {
             }
             _ => return Err(Error::NotFound("metric".into())),
         }
-        let v = value(k, user, &metric).await?;
-        let out = json!({"metric": name, "value": ferrum_domain::util::money(v), "unit": s(&metric, "unit"), "certified": s(&metric, "status") == Some("Certified"),
-                         "description": s(&metric, "description"), "lineage": s(&metric, "uses")});
+        let as_of = chrono::Utc::now();
+        let out = match path.as_str() {
+            // Each period's value, the current one marked partial, and when it was worked out.
+            "series" => {
+                let bucket: ferrum_studio::spec::Bucket = serde_json::from_value(json!(param("bucket").unwrap_or("month")))
+                    .map_err(|_| Error::field("bucket", "is day, week, month, quarter or year"))?;
+                let periods: u32 = param("periods").map_or(Ok(12), str::parse).map_err(|_| Error::field("periods", "is a number"))?;
+                let points: Vec<Value> = crate::metric::series(k, user, &metric, bucket, periods)
+                    .await?
+                    .into_iter()
+                    .map(|p| json!({"start": p.start, "value": p.value, "partial": p.partial}))
+                    .collect();
+                json!({"metric": name, "bucket": bucket, "as_of": as_of, "unit": s(&metric, "unit"), "points": points})
+            }
+            // What a change to it reaches: the metrics composed of it, directly or by way of others.
+            "impact" => json!({"metric": name, "used_by": crate::metric::used_by(k, user, name).await?}),
+            _ => {
+                let v = value(k, user, &metric).await?;
+                json!({"metric": name, "value": ferrum_domain::util::money(v), "unit": s(&metric, "unit"), "certified": s(&metric, "status") == Some("Certified"),
+                       "description": s(&metric, "description"), "lineage": s(&metric, "uses"), "as_of": as_of})
+            }
+        };
         let mut r = SiteResponse::json(200, &out);
         r.headers.push(("cache-control".into(), "no-store".into()));
         Ok(r)

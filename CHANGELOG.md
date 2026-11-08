@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0
+
+Composed metrics and series (Ferrum's Logic Platform, W6). A metric can be a formula over other metrics by name (`[Company terms] / [Company customers]`), worked out in exact decimals from each part's value for the person reading it, so two people read two numbers from one definition. A metric is never made of itself, even by way of others; a composed metric is certified after its parts; a part deprecated or uncertified leaves it without a value, said so, as does a division by zero, never a zero. `impact?metric=` lists what a change to a metric reaches. `series?metric=&bucket=month&periods=12` gives a metric period by period by its `series_by` date field (or period by period from its parts), the period not yet over marked partial. Values say when they were worked out (`as_of`).
+
 ## 0.4.5
 
 Rebuilt with Ferrum-Frontend c59c9a2: the names of its models, fields and manifest in Arabic and Hindi (68 each in ui/src/locales/names, which the platform serves to every page of the workspace, so a record's labels, the launcher and the bar read in the person's language), and the sentences its pages still showed in English (split around a link or a figure, built in code from a template or word by word) whole and translated (12 words each in ui/src/locales). Translated by the model, to be reviewed by native speakers.
