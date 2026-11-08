@@ -6,6 +6,7 @@
 //! replaces it, and is read no more. Datasets (`dataset`) are governed the same way, by the same
 //! helpers here.
 
+use crate::engine::{External, Stale, external_of};
 use crate::obj;
 use async_trait::async_trait;
 use chrono::{NaiveDate, Utc};
@@ -47,11 +48,13 @@ const MAX_DEPTH: usize = 8;
 const MAX_PARTS: usize = 20;
 
 /// What a metric is: a Studio query of one measure (summing amounts in several currencies in one when
-/// it converts them), or a formula over other metrics by name (`[revenue] / [orders]`), worked out in
-/// exact decimals from each part's value for the reader.
+/// it converts them), a formula over other metrics by name (`[revenue] / [orders]`), worked out in
+/// exact decimals from each part's value for the reader, or a query of external datasets through a Wren
+/// semantic model, asked of Metrics' engine (`engine`).
 pub(crate) enum Kind {
     Query(Box<Spec>, Option<Conversion>),
     Composed { text: String, formula: Formula, parts: Vec<String> },
+    External(Box<External>),
 }
 
 /// The metrics a formula names, each once, in order of name.
@@ -79,6 +82,15 @@ pub(crate) fn parts_of(text: &str) -> Result<Vec<String>> {
 pub(crate) fn kind_of(doc: &Doc) -> Result<Kind> {
     let formula = s(doc, "formula").map(str::trim).filter(|f| !f.is_empty());
     let defined = !matches!(doc.get("definition"), None | Some(Value::Null)) && doc.get("definition") != Some(&json!(""));
+    if let Some(external) = external_of(doc)? {
+        if formula.is_some() || defined {
+            return Err(Error::field("external", "an external metric is its external query alone: no definition or formula beside it"));
+        }
+        if conversion_of(doc)?.is_some() {
+            return Err(Error::field("convert_to", "an external metric is in its datasets' currency: its query converts if it must"));
+        }
+        return Ok(Kind::External(Box::new(external)));
+    }
     match (formula, defined) {
         (Some(_), true) => Err(Error::field("formula", "a metric is a query or a formula over other metrics, not both")),
         (Some(text), false) => {
@@ -104,6 +116,7 @@ pub(crate) fn fingerprint_of(kind: &Kind) -> String {
         Kind::Composed { text, .. } => {
             hex::encode(Sha256::digest(format!("ferrum.metrics.composed/1\n{}", text.split_whitespace().collect::<String>()).as_bytes()))
         }
+        Kind::External(e) => hex::encode(Sha256::digest(format!("ferrum.metrics.external/1\n{}\n{}", e.model, e.sql).as_bytes())),
     }
 }
 
@@ -315,7 +328,7 @@ async fn check_conversion(hc: &mut HookCtx<'_>, spec: &Spec, c: &Conversion) -> 
 
 /// What a metric meant when it was read, kept with the value: its query or formula, and how it converts.
 pub(crate) fn meaning(doc: &Doc) -> Value {
-    let keys = ["definition", "formula", "convert_to", "currency_field", "rate_date_field", "round_to"];
+    let keys = ["definition", "formula", "external", "convert_to", "currency_field", "rate_date_field", "round_to"];
     Value::Object(keys.iter().filter_map(|k| doc.get(*k).filter(|v| !v.is_null() && *v != &json!("")).map(|v| ((*k).to_string(), v.clone()))).collect())
 }
 
@@ -480,38 +493,54 @@ pub(crate) async fn deprecate(hc: &mut HookCtx<'_>, entity: &str, doc: &Doc, par
     Ok(json!({"status": "Deprecated"}))
 }
 
+/// A metric's value for its reader, and the external datasets it was read from whose data is older than
+/// their sources allow: a value is never passed off as current when part of it is not.
+pub(crate) struct Read {
+    pub value: Decimal,
+    pub stale: Vec<Stale>,
+}
+
 /// The metric's value for `ctx`, with its rights to the records the query counts. A composed metric is
 /// worked out from each part's value for the same person, so two people may read two numbers from one
 /// definition; a part not certified, or a division by zero, leaves it without a value, said so.
 pub(crate) async fn value(k: &Kernel, ctx: &Ctx, doc: &Doc) -> Result<Decimal> {
+    Ok(read(k, ctx, doc).await?.value)
+}
+
+/// The metric's value for `ctx`, with what of it is stale.
+pub(crate) async fn read(k: &Kernel, ctx: &Ctx, doc: &Doc) -> Result<Read> {
     value_at(k, ctx, doc, 0).await
 }
 
-type Valued<'a> = Pin<Box<dyn Future<Output = Result<Decimal>> + Send + 'a>>;
+type Valued<'a> = Pin<Box<dyn Future<Output = Result<Read>> + Send + 'a>>;
 
 fn value_at<'a>(k: &'a Kernel, ctx: &'a Ctx, doc: &'a Doc, depth: usize) -> Valued<'a> {
     Box::pin(async move {
         let me = s(doc, "metric_name").unwrap_or("this metric").to_string();
+        let fresh = |value| Read { value, stale: vec![] };
         match kind_of(doc)? {
-            Kind::Query(spec, None) => query_value(k, ctx, &spec).await,
+            Kind::Query(spec, None) => query_value(k, ctx, &spec).await.map(fresh),
             Kind::Query(spec, Some(c)) => {
                 let converted = convert(k, ctx, &me, &c, groups(k, ctx, &me, &spec, &c, None).await?).await?;
-                Ok(rounded(total(&me, converted.into_iter().map(|(_, v)| v))?, c.places))
+                Ok(fresh(rounded(total(&me, converted.into_iter().map(|(_, v)| v))?, c.places)))
             }
+            Kind::External(e) => crate::engine::read(k, ctx, &me, &e).await.map(|(value, stale)| Read { value, stale }),
             Kind::Composed { formula, parts, .. } => {
                 if depth >= MAX_DEPTH {
                     return Err(Error::invalid(format!("{me} is composed more than {MAX_DEPTH} deep")));
                 }
-                let mut row = serde_json::Map::new();
+                let (mut row, mut stale) = (serde_json::Map::new(), Vec::new());
                 for part in &parts {
                     let found = named(k, ctx, part).await?.ok_or_else(|| Error::invalid(format!("{me} has no value: there is no metric called {part}")))?;
                     if s(&found, "status") != Some("Certified") {
                         return Err(Error::invalid(format!("{me} has no value: {part} is not certified")));
                     }
-                    let v = value_at(k, ctx, &found, depth + 1).await?;
-                    row.insert(part.clone(), json!(v.to_string()));
+                    let r = value_at(k, ctx, &found, depth + 1).await?;
+                    row.insert(part.clone(), json!(r.value.to_string()));
+                    stale.extend(r.stale);
                 }
-                formula.eval(&row).ok_or_else(|| Error::invalid(format!("{me} has no value now: a part it divides by is zero, or empty")))
+                let value = formula.eval(&row).ok_or_else(|| Error::invalid(format!("{me} has no value now: a part it divides by is zero, or empty")))?;
+                Ok(Read { value, stale })
             }
         }
     })
@@ -594,6 +623,7 @@ fn series_at<'a>(k: &'a Kernel, ctx: &'a Ctx, doc: &'a Doc, bucket: Bucket, from
                 }
                 by_period.into_iter().map(|(start, values)| Ok((start, Some(rounded(total(&me, values)?, c.places))))).collect()
             }
+            Kind::External(_) => Err(Error::invalid(format!("{me} is read from external datasets and has no series yet: ask its source period by period"))),
             Kind::Query(mut spec, None) => {
                 let field = series_by()?;
                 spec.time_series =
@@ -672,6 +702,7 @@ impl DocHook for MetricHook {
                 let read = lineage(spec, |f| reached(hc.ctx, &spec.entity, f));
                 format!("{read}; converted by {} at the rate on {}", c.currency_field, c.date_field)
             }
+            Kind::External(e) => e.lineage(),
             Kind::Composed { parts, .. } => format!("Composed of: {}", parts.join(", ")),
         };
         doc.insert("uses".into(), json!(uses));
@@ -689,6 +720,8 @@ impl DocHook for MetricHook {
                 }
             }
             Kind::Composed { parts, .. } => check_parts(hc.kernel, hc.ctx, s(doc, "metric_name").unwrap_or_default(), &parts).await?,
+            // Planned by the engine on the saver's own view of its datasets: read-only, within a time limit.
+            Kind::External(e) => crate::engine::check(hc.kernel, hc.ctx, &e).await?,
         }
         Ok(())
     }

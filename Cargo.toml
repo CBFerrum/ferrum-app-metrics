@@ -25,6 +25,8 @@ uuid = { version = "1.10", features = ["v4", "v7", "serde"] }
 [dev-dependencies]
 # Its tests check that its interface is a release the platform takes.
 ferrum-apps = { git = "https://github.com/CBFerrum/Ferrum", branch = "main" }
+# The engine for external sources, run beside the server in its tests.
+ferrum-metrics-engine = { path = "engine" }
 tokio = { version = "1.45", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 
 [lints.clippy]
@@ -33,3 +35,7 @@ type_complexity = "allow"
 
 [profile.dev]
 debug = "line-tables-only"
+
+# Metrics' engine for external sources is a service of its own (engine/): the server never links it.
+[workspace]
+members = [".", "engine"]

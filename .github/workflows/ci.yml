@@ -43,9 +43,12 @@ jobs:
           create database ferrum_metrics_test owner ferrum;
           create database ferrum_metrics_datasets_test owner ferrum;
           SQL
-      - run: cargo fmt -- --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Metrics and its engine for external sources (engine/); the engine's tests need a deeper stack.
+      - run: cargo test --workspace
+        env:
+          RUST_MIN_STACK: "8388608"
 
   ui:
     runs-on: ubuntu-latest
