@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5
+
+Rebuilt with Ferrum-Frontend c59c9a2: the names of its models, fields and manifest in Arabic and Hindi (68 each in ui/src/locales/names, which the platform serves to every page of the workspace, so a record's labels, the launcher and the bar read in the person's language), and the sentences its pages still showed in English (split around a link or a figure, built in code from a template or word by word) whole and translated (12 words each in ui/src/locales). Translated by the model, to be reviewed by native speakers.
+
 ## 0.4.4
 
 The assistant knows what its records mean in its pages (contributes.shell.assistant): their states, what counts and where figures come from, with questions it suggests asking there.

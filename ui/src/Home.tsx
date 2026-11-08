@@ -5,7 +5,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { api, docPath, t, isolate } from "@ferrum/client";
-import { ErrorState, PageLoading, useShellTitle } from "@ferrum/kit";
+import { ErrorState, PageLoading, useShellTitle, placed } from "@ferrum/kit";
 
 export interface Row {
   id: string;
@@ -51,7 +51,7 @@ export function Home() {
       </header>
       {q.data.length === 0 && (
         <p className="faint">
-          {t("No metric is certified yet.")} <Link to="/e/Metric">{t("Metrics in draft")}</Link> {t("wait for a Data Steward.")}
+          {placed(t("No metric is certified yet. {p1} wait for a Data Steward."), { p1: <Link to="/e/Metric">{t("Metrics in draft")}</Link> })}
         </p>
       )}
       {byDomain(q.data).map(([domain, list]) => (

@@ -95,6 +95,7 @@ cd ui && npm run build && npm run check
 
 | Version | Highlights |
 |---|---|
+| **0.4.5** | Its names in Arabic and Hindi; the last English sentences translated. |
 | **0.4.4** | The assistant knows its records. |
 | **0.4.3** | Rebuilt with Ferrum-Frontend 5b22e7b: its own words in Arabic and Hindi. |
 | **0.4.2** | Rebuilt with Ferrum-Frontend 6537d65: once-shown answers kept; English isolated right to left; its own words translatable by a workspace. |
