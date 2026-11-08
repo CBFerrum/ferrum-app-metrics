@@ -53,6 +53,9 @@ It is stale when any part is, and has no value when any part has none.
     until it has stopped, so slow queries never hold more than the turns there are. A query that fails
     unexpectedly is refused (500), and the engine goes on;
   - memory: a query needing more fails, since nothing spills to disk (422);
+  - a dataset that cannot be read, whether missing, unreadable or malformed: the query is refused as
+    unavailable (503). The reason, with the dataset's files, is written to the engine's standard error for its
+    operator, never sent to the reader;
   - concurrency: past the queries allowed at once, a query waits its turn, then is told the engine is busy (503).
 
 ## Running it

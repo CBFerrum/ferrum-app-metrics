@@ -29,6 +29,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use datafusion::arrow::datatypes::{Schema, SchemaRef};
+use datafusion::arrow::error::ArrowError;
 use datafusion::arrow::util::display::array_value_to_string;
 use datafusion::catalog::Session;
 use datafusion::common::config::{ConfigNonZeroUsize, Dialect};
@@ -227,8 +228,26 @@ impl Refused {
     fn from_engine(e: &DataFusionError, doing: &str) -> Self {
         match e.find_root() {
             DataFusionError::ResourcesExhausted(m) => Self::new(422, format!("{doing}: it needs more memory than one query may hold ({m})")),
+            // A dataset that cannot be read is not the query's fault, and its files are the operator's to know.
+            root if unreadable(root) => {
+                eprintln!("ferrum-metrics-engine: {doing}: {e}");
+                Self::new(503, format!("{doing}: a dataset it reads cannot be read now"))
+            }
             _ => Self::invalid(format!("{doing}: {e}")),
         }
+    }
+}
+
+/// A failure to read a dataset's files (missing, unreadable, malformed), as opposed to one of the query. Such
+/// an error can carry a file's path or a raw row, read before any reader's rules apply (a value that does not
+/// parse comes with its whole row, hidden columns and others' rows included): it is never sent to a reader.
+fn unreadable(root: &DataFusionError) -> bool {
+    match root {
+        DataFusionError::ObjectStore(_) | DataFusionError::IoError(_) | DataFusionError::ParquetError(_) => true,
+        DataFusionError::ArrowError(a, _) => {
+            matches!(**a, ArrowError::IoError(..) | ArrowError::CsvError(_) | ArrowError::ParseError(_) | ArrowError::ParquetError(_))
+        }
+        _ => false,
     }
 }
 
@@ -546,7 +565,11 @@ impl Shape {
 /// out again: what stays is the reader's table, under the dataset's name.
 async fn restricted(ctx: &SessionContext, listed: &Dataset, a: &Allowed) -> Result<Arc<dyn TableProvider>, Refused> {
     let path = listed.path.to_string_lossy().to_string();
-    let unreadable = |e: DataFusionError| Refused::new(503, format!("{} cannot be read now: {e}", listed.name));
+    // Why is the operator's to know, in the engine's log: the reader is told it cannot be read now.
+    let unreadable = |e: DataFusionError| {
+        eprintln!("ferrum-metrics-engine: {} cannot be read: {e}", listed.name);
+        Refused::new(503, format!("{} cannot be read now", listed.name))
+    };
     if !listed.path.exists() {
         return Err(Refused::new(503, format!("{} cannot be read now: nothing is at its path", listed.name)));
     }

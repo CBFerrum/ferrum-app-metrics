@@ -216,9 +216,16 @@ async fn ask(k: &Kernel, path: &str, body: &Value) -> Result<Value> {
     let address = format!("{}/{path}", base.trim_end_matches('/'));
     // The engine is the operator's, on a private network: its address may be private, and plain http.
     let (client, url) = k.vetted_client(&address, true, Duration::from_secs(ENGINE_SECS), "ferrum-metrics").await?;
-    let r = client.post(url).bearer_auth(token).json(body).send().await.map_err(|e| Error::Unavailable(format!("Metrics' engine cannot be reached: {e}")))?;
+    // Why is the operator's to know, in the server's log: its address is not the reader's.
+    let r = client.post(url).bearer_auth(token).json(body).send().await.map_err(|e| {
+        tracing::warn!(error = %e, "Metrics' engine cannot be reached");
+        Error::Unavailable("Metrics' engine cannot be reached".into())
+    })?;
     let status = r.status().as_u16();
-    let answer: Value = r.json().await.map_err(|e| Error::Unavailable(format!("Metrics' engine answered with something that is not JSON: {e}")))?;
+    let answer: Value = r.json().await.map_err(|e| {
+        tracing::warn!(error = %e, status, "Metrics' engine answered with something that is not JSON");
+        Error::Unavailable("Metrics' engine answered with something that is not JSON".into())
+    })?;
     let said = answer["error"].as_str().unwrap_or("it gave no reason").to_string();
     match status {
         200..=299 => Ok(answer),

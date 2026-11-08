@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.2
+
+- **A value in a dataset that did not parse sent its whole raw row to the reader**, including other people's
+  rows and hidden columns, because the file is parsed before a reader's rules apply. Such errors are no longer
+  sent: a dataset that cannot be read, whether missing, unreadable or malformed, is refused as unavailable
+  (503), and why goes to the engine's standard error for its operator (FLC-SEM-005).
+- A reader is not told where things are either: Metrics' errors leave out the engine's address, and the
+  engine's leave out a dataset's file paths. The server logs Metrics' detail as a warning.
+- The KPI page says why a metric has no value without repeating its name.
+- Found by walking the KPI page with the engine stopped.
+
 ## 0.7.1
 
 - The KPI page says when a value was read from data older than its source allows, naming those sources, and
