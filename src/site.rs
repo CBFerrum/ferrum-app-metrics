@@ -5,7 +5,6 @@
 //! (`warehouse`). `POST import/wren` reviews a Wren semantic model against the metrics defined here
 //! and brings in what a reviewer accepts, as drafts (`wren`).
 
-use crate::metric::value;
 use ferrum_domain::util::{id, s, sys};
 use ferrum_kernel::{Error, Filter, Kernel, Result, Site, SiteRequest, SiteResponse};
 use serde_json::{Value, json};
@@ -69,10 +68,12 @@ impl Site for MetricsSite {
             }
             // What a change to it reaches: the metrics composed of it, directly or by way of others.
             "impact" => json!({"metric": name, "used_by": crate::metric::used_by(k, user, name).await?}),
+            // Its value, and the external datasets it was read from that are older than their sources allow.
             _ => {
-                let v = value(k, user, &metric).await?;
-                json!({"metric": name, "value": ferrum_domain::util::money(v), "unit": s(&metric, "unit"), "certified": s(&metric, "status") == Some("Certified"),
-                       "description": s(&metric, "description"), "lineage": s(&metric, "uses"), "as_of": as_of})
+                let r = crate::metric::read(k, user, &metric).await?;
+                let stale: Vec<Value> = r.stale.iter().map(|s| s.json()).collect();
+                json!({"metric": name, "value": ferrum_domain::util::money(r.value), "unit": s(&metric, "unit"), "certified": s(&metric, "status") == Some("Certified"),
+                       "description": s(&metric, "description"), "lineage": s(&metric, "uses"), "as_of": as_of, "stale": stale})
             }
         };
         let mut r = SiteResponse::json(200, &out);

@@ -1,0 +1,23 @@
+[package]
+name = "ferrum-metrics-engine"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Metrics' engine for external sources: a metric's Wren semantic model over datasets, planned by Wren's engine and run on DataFusion, apart from the server, with each reader's rights"
+repository = "https://github.com/CBFerrum/ferrum-app-metrics"
+publish = false
+
+[[bin]]
+name = "ferrum-metrics-engine"
+path = "src/main.rs"
+
+[dependencies]
+# Wren's own semantic engine, pinned, and the DataFusion it is built on (Apache-2.0).
+wren-semantic-core = "=0.5.1"
+datafusion = { version = "55.1", default-features = false, features = ["sql", "parquet", "string_expressions"] }
+async-trait = "0.1"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.46", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }

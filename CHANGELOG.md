@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+Metrics read from external datasets (Ferrum's Logic Platform: FLC-SEM-005, -006, -007, -010).
+
+- **Metrics' engine** (`engine/`, the binary `ferrum-metrics-engine`): a service of its own beside the server that plans a metric's query through its Wren semantic model with Wren's own engine (`wren-semantic-core` 0.5.1, pinned) and runs it on DataFusion 55 over the operator's CSV and Parquet datasets. One SELECT over the model's models runs; definitions, changes, statements, datasets named directly, files and URLs are refused, as is what Wren cannot plan exactly. Time, memory (nothing spills), rows and concurrency are bounded; a dataset belongs to one workspace; Metrics holds its token. See docs/engine.md and engine/Dockerfile.
+- **External metrics** (`external`: a model and its query) and **External Sources**, described by Data Stewards: the rows each reader sees (by address, or by the values their roles map to), the columns only some roles see, and how fresh the data must be. The engine reads each dataset through a table that applies those in its own scan, for the one reader asking. An external metric is checked when saved, on its author's own view, and fixed by certification.
+- **Stale is said**: a value read from data older than its source allows carries it under `stale`, and so does anything composed of it. With the engine gone, there is no value, said so.
+- The README's changelog has rows for 0.5.0 and 0.6.0 again, as the platform's app contract asks.
+
 ## 0.6.0
 
 Currencies, fiscal periods, kept values' meaning and owners, and Wren models (Ferrum's Logic Platform:
