@@ -6,12 +6,18 @@
 //!
 //! It stops taking work on SIGTERM or Ctrl-C and finishes what it holds.
 
-use ferrum_metrics_engine::{Config, Engine, serve};
+use ferrum_metrics_engine::{Config, Engine, STACK, serve};
 use std::sync::Arc;
 
-#[tokio::main]
-async fn main() {
-    if let Err(e) = run().await {
+fn main() {
+    // Queries run on these threads, each with the stack a query at the largest size taken needs.
+    let done = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(STACK)
+        .build()
+        .map_err(|e| format!("cannot start: {e}"))
+        .and_then(|runtime| runtime.block_on(run()));
+    if let Err(e) = done {
         eprintln!("ferrum-metrics-engine: {e}");
         std::process::exit(1);
     }

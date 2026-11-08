@@ -1,0 +1,6 @@
+# The engine's image is built from this repository's root (engine/Dockerfile): only what its build reads.
+.git
+target
+**/node_modules
+ui/dist
+.cargo/config.toml

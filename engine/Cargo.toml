@@ -12,9 +12,10 @@ name = "ferrum-metrics-engine"
 path = "src/main.rs"
 
 [dependencies]
-# Wren's own semantic engine, pinned, and the DataFusion it is built on (Apache-2.0).
+# Wren's own semantic engine, pinned, and the DataFusion it is built on (Apache-2.0). Its recursion over a
+# query grows its stack as deep as the query goes (recursive_protection) rather than overflowing it.
 wren-semantic-core = "=0.5.1"
-datafusion = { version = "55.1", default-features = false, features = ["sql", "parquet", "string_expressions"] }
+datafusion = { version = "55.1", default-features = false, features = ["sql", "parquet", "string_expressions", "recursive_protection"] }
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

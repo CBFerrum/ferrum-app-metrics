@@ -70,3 +70,58 @@ jobs:
         working-directory: ui
       - run: npm test
         working-directory: ui
+
+  # Metrics' engine as its image (engine/Dockerfile), run as an operator runs it and asked as Metrics asks it;
+  # published from main as ghcr.io/cbferrum/ferrum-metrics-engine (docs/engine.md).
+  engine-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: engine/Dockerfile
+          load: true
+          tags: ferrum-metrics-engine:ci
+          cache-from: type=gha,scope=engine
+          cache-to: type=gha,scope=engine,mode=max
+      - name: Run it read-only, unprivileged, and ask it
+        run: |
+          mkdir -p smoke/data
+          printf 'id,region,total\n1,North,100.00\n2,North,50.00\n3,South,25.50\n' > smoke/data/orders.csv
+          cat > smoke/engine.json <<'JSON'
+          {"datasets": [{"name": "orders_lake", "workspace": "acme", "format": "csv", "path": "/data/orders.csv"}],
+           "limits": {"rows": 100, "millis": 10000, "memory_mb": 256, "concurrent": 2, "wait_millis": 2000}}
+          JSON
+          token=$(openssl rand -hex 24)
+          docker run -d --name engine -p 127.0.0.1:5180:5180 --read-only --cap-drop ALL --security-opt no-new-privileges \
+            -e FERRUM_METRICS_ENGINE_CONFIG=/etc/ferrum/engine.json -e FERRUM_METRICS_ENGINE_TOKEN="$token" \
+            -v "$PWD/smoke/engine.json:/etc/ferrum/engine.json:ro" -v "$PWD/smoke/data:/data:ro" ferrum-metrics-engine:ci
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:5180/health && break; sleep 1; done
+          model='{"catalog": "wren", "schema": "public", "models": [{"name": "orders", "tableReference": {"table": "orders_lake"}, "columns": [{"name": "id", "type": "integer"}, {"name": "region", "type": "varchar"}, {"name": "total", "type": "double"}]}]}'
+          ask() { curl -s -o out.json -w '%{http_code}' -H 'content-type: application/json' "$@" http://127.0.0.1:5180/query; }
+          body="{\"workspace\": \"acme\", \"manifest\": $model, \"sql\": \"select sum(total) from orders\", \"datasets\": [{\"name\": \"orders_lake\", \"rows\": [{\"column\": \"region\", \"values\": [\"North\"]}]}]}"
+          # The North's orders alone, and when they were written.
+          test "$(ask -H "Authorization: Bearer $token" -d "$body")" = 200; cat out.json; echo
+          grep -q '"rows":\[\["150.0"\]\]' out.json && grep -q '"written_at":"' out.json
+          # Without the token, nothing.
+          test "$(ask -d "$body")" = 401
+          # A change, refused.
+          test "$(ask -H "Authorization: Bearer $token" -d "${body/select sum(total) from orders/drop table orders}")" = 400
+          # Docker's own health check passes, and SIGTERM stops it cleanly.
+          for i in $(seq 1 20); do [ "$(docker inspect --format '{{.State.Health.Status}}' engine)" = healthy ] && break; sleep 5; done
+          test "$(docker inspect --format '{{.State.Health.Status}}' engine)" = healthy
+          docker stop -t 10 engine && test "$(docker inspect --format '{{.State.ExitCode}}' engine)" = 0
+          docker logs engine
+      - name: Publish from main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for tag in "sha-${GITHUB_SHA::12}" latest; do
+            docker tag ferrum-metrics-engine:ci "ghcr.io/cbferrum/ferrum-metrics-engine:$tag"
+            docker push "ghcr.io/cbferrum/ferrum-metrics-engine:$tag"
+          done

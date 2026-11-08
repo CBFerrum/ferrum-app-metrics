@@ -251,3 +251,46 @@ async fn answers_say_when_their_data_was_written() {
     let words = e.check(&query("select max(owner) from orders", everything())).await.unwrap();
     assert!(!words.columns[0].numeric, "{words:?}");
 }
+
+/// `f` on a thread with the stack the engine's own threads have, as a query runs in the service: it ends
+/// answered or refused, since a stack overflowed would take the whole process down.
+fn on_an_engine_thread<F: Future<Output = ()>>(f: impl FnOnce() -> F + Send + 'static) {
+    let thread = std::thread::Builder::new()
+        .stack_size(ferrum_metrics_engine::STACK)
+        .spawn(move || tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(f()));
+    thread.unwrap().join().expect("answered or refused");
+}
+
+#[test]
+fn a_deep_query_is_answered_or_refused_never_the_engine_lost() {
+    on_an_engine_thread(|| async {
+        let e = engine(&lake("deep"), Limits::default());
+        // Long and shallow is answered: 2,000 values in one list.
+        let ids = (1..=2000).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+        assert_eq!(one(&e, &format!("select sum(total) from orders where id in ({ids})"), everything()).await.as_deref(), Some("185.5"));
+        // Terms nested as deep as a metric could need are answered: 185.5 × 90 = 16,695.
+        let chain = |n: usize| format!("select sum({}) from orders", vec!["total"; n].join(" + "));
+        assert_eq!(one(&e, &chain(90), everything()).await.as_deref(), Some("16695.0"));
+        // Deeper is refused before anything is planned, even the deepest a query of the largest size can be.
+        refused(&e, query(&chain(101), everything()), 400, "terms nest at most 100 deep").await;
+        let deepest = format!("select sum(total{}) from orders", "+1".repeat(9985));
+        assert!(deepest.len() <= 20_000, "{}", deepest.len());
+        refused(&e, query(&deepest, everything()), 400, "terms nest at most 100 deep").await;
+        // So is a model's calculated column, and its relationships' conditions.
+        let mut deep_model = model();
+        deep_model["models"][0]["columns"][6]["expression"] = json!(vec!["total"; 101].join(" + "));
+        refused(&e, Query { manifest: deep_model, ..query("select sum(total) from orders", everything()) }, 400, "terms nest at most 100 deep").await;
+        let mut deep_join = model();
+        deep_join["relationships"][0]["condition"] = json!(format!("orders.region = regions.region{}", " and 1 = 1".repeat(101)));
+        refused(&e, Query { manifest: deep_join, ..query("select sum(total) from orders", everything()) }, 400, "terms nest at most 100 deep").await;
+        // Brackets past the parser's depth are refused too.
+        refused(&e, query(&format!("select sum({}total{}) from orders", "(".repeat(300), ")".repeat(300)), everything()), 400, "does not parse").await;
+        // As many models read as a metric could need, and no more.
+        let reading =
+            |n: usize| format!("select count(*) from orders o0{}", (1..n).map(|i| format!(" join orders o{i} on o0.id = o{i}.id")).collect::<String>());
+        assert_eq!(one(&e, &reading(32), everything()).await.as_deref(), Some("4"));
+        refused(&e, query(&reading(33), everything()), 400, "reads at most 32 models").await;
+        let unions = format!("select count(*) from ({})", vec!["select 1 as x from orders"; 33].join(" union all "));
+        refused(&e, query(&unions, everything()), 400, "reads at most 32 models").await;
+    });
+}

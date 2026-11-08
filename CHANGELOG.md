@@ -4,6 +4,13 @@
 
 - The KPI page says when a value was read from data older than its source allows, naming those sources, and
   says when a metric has no value now, with the reason, instead of seeming to load (FLC-SEM-007).
+- Metrics' engine holds a query to terms nested at most 100 deep and 32 models read, and a model's calculated
+  columns and relationships to the same depth, before anything is planned (FLC-SEM-006). A query of 3,329
+  terms had taken over a minute to plan in a debug build, and planning cannot be stopped midway.
+- Its threads have 64 MiB stacks, and DataFusion's recursion grows its stack as it needs
+  (`recursive_protection`): a deep query can no longer overflow a thread and take the engine down.
+- CI builds the engine's image, runs it read-only and unprivileged, asks it as Metrics does and stops it with
+  SIGTERM; from main it publishes it as `ghcr.io/cbferrum/ferrum-metrics-engine` (`latest`, `sha-<commit>`).
 
 ## 0.7.0
 
