@@ -106,7 +106,7 @@ async fn deliver_one(k: &Kernel, ctx: &Ctx, tx: &mut Tx, metric_id: Uuid, follow
         tx,
         "MetricSnapshot",
         obj(json!({"metric": metric_id.to_string(), "value": money(v), "read_by": follower, "read_at": Utc::now().to_rfc3339(),
-                   "certified_hash": s(&metric, "certified_hash")})),
+                   "certified_hash": s(&metric, "certified_hash"), "definition": crate::metric::meaning(&metric)})),
     )
     .await?;
     let unit = s(&metric, "unit").map(|u| format!(" {u}")).unwrap_or_default();

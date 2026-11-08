@@ -2,7 +2,8 @@
 //! counted. `/api/app/metrics/value?metric=<name>`: a certified metric's value and what it means. A
 //! metric in draft is read only by its owner; a deprecated one points at what replaces it.
 //! `dataset?name=<name>&format=csv|ndjson` and `values?since=<time>` are the warehouse feed
-//! (`warehouse`).
+//! (`warehouse`). `POST import/wren` reviews a Wren semantic model against the metrics defined here
+//! and brings in what a reviewer accepts, as drafts (`wren`).
 
 use crate::metric::value;
 use ferrum_domain::util::{id, s, sys};
@@ -24,6 +25,11 @@ impl Site for MetricsSite {
                 return crate::warehouse::dataset(k, user, name, param("format").unwrap_or("csv")).await;
             }
             ("GET", "values") => return crate::warehouse::values(k, user, param("since")).await,
+            ("POST", "import/wren") => {
+                let mut r = SiteResponse::json(200, &crate::wren::import(k, user, &req.body).await?);
+                r.headers.push(("cache-control".into(), "no-store".into()));
+                return Ok(r);
+            }
             _ => return Err(Error::NotFound(format!("metrics endpoint {} {}", req.method, req.path))),
         }
         let name =
@@ -52,7 +58,7 @@ impl Site for MetricsSite {
             // Each period's value, the current one marked partial, and when it was worked out.
             "series" => {
                 let bucket: ferrum_studio::spec::Bucket = serde_json::from_value(json!(param("bucket").unwrap_or("month")))
-                    .map_err(|_| Error::field("bucket", "is day, week, month, quarter or year"))?;
+                    .map_err(|_| Error::field("bucket", "is day, week, month, quarter, year, fiscal_quarter or fiscal_year"))?;
                 let periods: u32 = param("periods").map_or(Ok(12), str::parse).map_err(|_| Error::field("periods", "is a number"))?;
                 let points: Vec<Value> = crate::metric::series(k, user, &metric, bucket, periods)
                     .await?

@@ -175,7 +175,8 @@ async fn scenario() {
     t.act(&director, mid, "snapshot", Value::Null).await.unwrap();
     let hers = t.k.list(&rep1, "MetricSnapshot", &ListQuery::default()).await.unwrap().rows;
     assert_eq!((hers.len(), hers[0]["read_by"].as_str()), (1, Some("rep1@numbers.test")), "a reader sees her own values");
-    assert_eq!(t.k.list(&steward, "MetricSnapshot", &ListQuery::default()).await.unwrap().rows.len(), 2);
+    // Each was read with its reader's rights, so it is theirs: a steward does not see the director's 3.
+    assert!(t.k.list(&steward, "MetricSnapshot", &ListQuery::default()).await.unwrap().rows.is_empty(), "a steward sees no one else's values");
     // An average is a decimal, read the same way.
     let avg = json!({"entity": "Customer", "filters": [["customer_type", "eq", "Company"]], "measures": [{"fn": "avg", "field": "payment_terms_days"}]});
     let terms = uid(&t.insert(&author, "Metric", json!({"metric_name": "Average payment terms", "unit": "days", "definition": avg})).await["id"]);

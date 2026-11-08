@@ -18,7 +18,7 @@ roles:
       - {entity: Metric, read: true, write: true, create: true}
       - {entity: Dataset, read: true, write: true, create: true}
       - {entity: BusinessTerm, read: true, write: true, create: true}
-      - {entity: MetricSnapshot, read: true}
+      - {entity: MetricSnapshot, read: true, if_owner: true}
       - {entity: MetricSubscription, read: true, write: true, create: true, delete: true, if_owner: true}
   - name: Data Steward
     description: Certifies and deprecates metrics and datasets, and keeps the glossary.
@@ -26,7 +26,7 @@ roles:
       - {entity: Metric, read: true, write: true}
       - {entity: Dataset, read: true, write: true}
       - {entity: BusinessTerm, read: true, write: true, create: true}
-      - {entity: MetricSnapshot, read: true, export: true}
+      - {entity: MetricSnapshot, read: true, export: true, if_owner: true}
       - {entity: MetricSubscription, read: true, write: true, create: true, delete: true, if_owner: true}
   - name: Metric Reader
     description: Reads certified metrics and datasets, with their own rights to the records they count, and loads them into a warehouse.
@@ -37,6 +37,9 @@ roles:
       - {entity: MetricSnapshot, read: true, if_owner: true}
       - {entity: MetricSubscription, read: true, write: true, create: true, delete: true, if_owner: true}
 
+# A kept value was read with its reader's rights, so it is theirs to see: no role reads another's,
+# however much it may do with the metrics themselves.
+#
 # Personal-data requests reach the people Metrics names by address: who owns, certifies and reads a
 # metric, who keeps a term, and who follows one. Erasure takes the address off; the records stay.
 personal_data:
