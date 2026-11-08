@@ -9,7 +9,7 @@ modules:
     label: Metrics
     icon: layout-dashboard
     order: 62
-    items: [Metric, Dataset, BusinessTerm, MetricSnapshot, MetricSubscription]
+    items: [Metric, Dataset, BusinessTerm, MetricSnapshot, MetricSubscription, ExternalSource]
 
 roles:
   - name: Metric Author
@@ -20,6 +20,7 @@ roles:
       - {entity: BusinessTerm, read: true, write: true, create: true}
       - {entity: MetricSnapshot, read: true, if_owner: true}
       - {entity: MetricSubscription, read: true, write: true, create: true, delete: true, if_owner: true}
+      - {entity: ExternalSource, read: true}
   - name: Data Steward
     description: Certifies and deprecates metrics and datasets, and keeps the glossary.
     permissions:
@@ -27,6 +28,7 @@ roles:
       - {entity: Dataset, read: true, write: true}
       - {entity: BusinessTerm, read: true, write: true, create: true}
       - {entity: MetricSnapshot, read: true, export: true, if_owner: true}
+      - {entity: ExternalSource, read: true, write: true, create: true, delete: true}
       - {entity: MetricSubscription, read: true, write: true, create: true, delete: true, if_owner: true}
   - name: Metric Reader
     description: Reads certified metrics and datasets, with their own rights to the records they count, and loads them into a warehouse.
