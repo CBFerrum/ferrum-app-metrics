@@ -12,7 +12,7 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
 | 📊 App | `metrics`, native, in the server |
 | 🧩 Package | `metrics` |
 | 🖥️ Interface | its own, at `/kpis/`: the certified metrics by domain, each with its value for the viewer, and the certified datasets with their addresses for a warehouse |
-| 🔌 Endpoints | `GET /api/app/metrics/value?metric=<name>`; the warehouse feed `GET /api/app/metrics/dataset?name=<name>&format=csv\|ndjson` and `GET /api/app/metrics/values?since=<time>` |
+| 🔌 Endpoints | `GET /api/app/metrics/value?metric=<name>`, `series?metric=<name>&bucket=month&periods=12`, `impact?metric=<name>`; the warehouse feed `GET /api/app/metrics/dataset?name=<name>&format=csv\|ndjson` and `GET /api/app/metrics/values?since=<time>` |
 | 🔐 Roles | Metric Author, Data Steward, Metric Reader |
 | 📜 Licence | AGPL-3.0-only |
 
@@ -21,6 +21,13 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
 - **Defined once.** A metric is a Studio query of exactly one measure, ungrouped. It is checked when
   saved: a query that does not run against the records, or names a field that is not there, is
   refused.
+- **Composed of others.** A metric can be a formula over other metrics by name, `[Revenue] / [Orders]`,
+  worked out from each part's value for whoever reads it. It is never made of itself, even by way of
+  others, it is certified after its parts, and a part deprecated or a division by zero leaves it without a
+  value, said so. `GET /api/app/metrics/impact?metric=<name>` lists the metrics a change reaches.
+- **Period by period.** `GET /api/app/metrics/series?metric=<name>&bucket=month&periods=12` gives its value
+  for each period by its `series_by` date field, the current period marked partial; every value says when
+  it was worked out (`as_of`).
 - **Lineage.** Each metric and dataset records the record and the fields it reads, and each linked
   record's by the field that reaches it, worked out from its definition, never typed in.
 - **Datasets.** A dataset is a table defined once as a Studio query: record fields, or groupings and
