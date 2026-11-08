@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- The KPI page says when a value was read from data older than its source allows, naming those sources, and
+  says when a metric has no value now, with the reason, instead of seeming to load (FLC-SEM-007).
+
 ## 0.7.0
 
 Metrics read from external datasets (Ferrum's Logic Platform: FLC-SEM-005, -006, -007, -010).

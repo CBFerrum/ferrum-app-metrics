@@ -1,6 +1,7 @@
 // The certified metrics by domain, each with its value for the viewer (read with their own rights)
 // and its lineage, then the certified datasets with their addresses for a warehouse to load. Each
-// opens its record.
+// opens its record. A value read from external data older than its source allows says so, and a
+// metric without a value now says why, rather than seeming to load.
 
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
@@ -20,6 +21,17 @@ export function loadUrl(name: string, format: "csv" | "ndjson"): string {
   return `/api/app/metrics/dataset?${new URLSearchParams({ name, format }).toString()}`;
 }
 
+/** A metric's value as Metrics gives it: the external sources it was read from that are stale among it. */
+export interface Read {
+  value: string;
+  stale?: { source: string }[];
+}
+
+/** The sources a value was read from whose data is older than they allow, each once, in name order. */
+export function staleSources(read: Read | undefined): string[] {
+  return [...new Set((read?.stale ?? []).map((s) => s.source).filter(Boolean))].sort();
+}
+
 /** Metrics by domain, domains in name order, "Other" last. */
 export function byDomain(list: Row[]): [string, Row[]][] {
   const out = new Map<string, Row[]>();
@@ -37,12 +49,13 @@ export function Home() {
   const values = useQueries({
     queries: (q.data ?? []).map((m) => ({
       queryKey: ["metrics", "value", m.metric_name],
-      queryFn: () => api.get<{ value: string }>("/api/app/metrics/value", { metric: String(m.metric_name) }).then((r) => r.value),
+      queryFn: () => api.get<Read>("/api/app/metrics/value", { metric: String(m.metric_name) }),
+      retry: false,
     })),
   });
   if (q.isPending) return <PageLoading />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
-  const valueOf = new Map((q.data ?? []).map((m, i) => [m.id, values[i]?.data]));
+  const readOf = new Map((q.data ?? []).map((m, i) => [m.id, values[i]]));
   return (
     <div className="np-page">
       <header className="row" style={{ justifyContent: "space-between" }}>
@@ -58,15 +71,29 @@ export function Home() {
         <section key={domain} className="card card-pad stack" aria-label={domain}>
           <h3>{isolate(domain)}</h3>
           <div className="np-columns">
-            {list.map((m) => (
-              <Link key={m.id} className="card card-pad stack" to={`/e/Metric/${m.id}`}>
-                <strong>{isolate(String(m.metric_name))}</strong>
-                <span style={{ fontSize: 28 }}>
-                  {valueOf.get(m.id) ?? "…"} {isolate(String(m.unit ?? ""))}
-                </span>
-                <span className="faint">{isolate(String(m.uses ?? ""))}</span>
-              </Link>
-            ))}
+            {list.map((m) => {
+              const read = readOf.get(m.id);
+              const stale = staleSources(read?.data);
+              return (
+                <Link key={m.id} className="card card-pad stack" to={`/e/Metric/${m.id}`}>
+                  <strong>{isolate(String(m.metric_name))}</strong>
+                  <span style={{ fontSize: 28 }}>
+                    {read?.isError ? "—" : (read?.data?.value ?? "…")} {isolate(String(m.unit ?? ""))}
+                  </span>
+                  {read?.isError && (
+                    <span className="faint" role="status">
+                      {placed(t("No value now: {reason}"), { reason: isolate(read.error instanceof Error ? read.error.message : String(read.error)) })}
+                    </span>
+                  )}
+                  {stale.length > 0 && (
+                    <span className="faint" role="status">
+                      {placed(t("Read from data older than its source allows: {sources}"), { sources: isolate(stale.join(", ")) })}
+                    </span>
+                  )}
+                  <span className="faint">{isolate(String(m.uses ?? ""))}</span>
+                </Link>
+              );
+            })}
           </div>
         </section>
       ))}
