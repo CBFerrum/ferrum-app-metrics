@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byDomain, loadUrl, staleSources } from "./Home";
+import { byDomain, loadUrl, reasonOf, staleSources } from "./Home";
 
 describe("metrics by domain", () => {
   it("groups by domain in name order, other last", () => {
@@ -30,5 +30,15 @@ describe("stale values", () => {
     expect(staleSources({ value: "150" })).toEqual([]);
     expect(staleSources({ value: "150", stale: [] })).toEqual([]);
     expect(staleSources({ value: "75", stale: [{ source: "returns_lake" }, { source: "orders_lake" }, { source: "orders_lake" }] })).toEqual(["orders_lake", "returns_lake"]);
+  });
+});
+
+describe("no value now", () => {
+  it("says why, without the name its card already shows", () => {
+    expect(reasonOf("Lake revenue", new Error("Lake revenue has no value now: Metrics' engine cannot be reached"))).toBe("Metrics' engine cannot be reached");
+    expect(reasonOf("Lake revenue", new Error("Lake revenue has no value for you: not yours"))).toBe("not yours");
+    expect(reasonOf("Lake revenue", new Error("entity: you are not permitted to read Request"))).toBe("entity: you are not permitted to read Request");
+    expect(reasonOf("Other", new Error("Lake revenue has no value now: x"))).toBe("Lake revenue has no value now: x");
+    expect(reasonOf("Lake revenue", "offline")).toBe("offline");
   });
 });
