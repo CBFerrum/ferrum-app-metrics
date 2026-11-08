@@ -43,6 +43,9 @@ jobs:
           create database ferrum_metrics_test owner ferrum;
           create database ferrum_metrics_datasets_test owner ferrum;
           SQL
+      # The lock says what the engine's image is built from (engine/Dockerfile, --locked); Metrics has to
+      # keep working with Ferrum's main.
+      - run: cargo update -p ferrum-kernel
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # Metrics and its engine for external sources (engine/); the engine's tests need a deeper stack.
