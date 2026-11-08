@@ -14,7 +14,8 @@
 //!   are never registered under a name a query could use.
 //! * **A query is one SELECT** over the model's models. Definitions, changes, other statements, files
 //!   and URLs are refused. Memory is bounded with nothing spilled to disk; time, rows and how many run at
-//!   once are bounded too. What Wren cannot plan exactly fails, saying why.
+//!   once are bounded too, and so, before anything is planned, are how deep a query's terms nest and how
+//!   many models it reads. What Wren cannot plan exactly fails, saying why.
 //! * **Every answer says when each dataset it read was last written**, for Metrics to say what is stale.
 //!
 //! Wren's own row and column rules, and its data source, are taken out of a model before it runs: the
@@ -46,11 +47,14 @@ use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::prelude::{CsvReadOptions, ParquetReadOptions, SessionConfig, SessionContext, lit};
 use datafusion::sql::parser::Statement as Parsed;
-use datafusion::sql::sqlparser::ast::Statement as SqlStatement;
+use datafusion::sql::sqlparser::ast::{Expr as SqlExpr, ObjectName, Statement as SqlStatement, Visit, Visitor};
+use datafusion::sql::sqlparser::dialect::GenericDialect;
+use datafusion::sql::sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -60,8 +64,17 @@ use wren_core::mdl::{AnalyzedWrenMDL, transform_sql_with_ctx};
 
 /// The largest request body, semantic model and query taken.
 pub const MOST_BODY: usize = 1 << 20;
+/// Each of the engine's threads' stacks. Planning a query recurses as deep as the query goes: DataFusion's own
+/// recursion grows its stack as it needs, and for the rest (Wren's), a query at the largest size taken stays
+/// well within this. Reserved, and used only as deep as a query goes.
+pub const STACK: usize = 64 << 20;
 const MOST_SQL: usize = 20_000;
 const MOST_MODELS: usize = 200;
+/// The models a query reads, counting each time it reads one, and how deep its terms nest (`a + b + c` is three
+/// deep): more than a metric needs, and little enough that planning, which cannot be stopped midway, stays short.
+/// A model's calculated columns and relationships are held to the same depth.
+const MOST_READS: usize = 32;
+const MOST_DEPTH: usize = 100;
 
 /// What the operator lists: the datasets, and the bounds every query runs within.
 #[derive(Debug, Clone, Deserialize)]
@@ -362,6 +375,9 @@ impl Engine {
         if !matches!(&statement, Parsed::Statement(s) if matches!(**s, SqlStatement::Query(_))) {
             return Err(Refused::invalid("only a single SELECT is run: nothing is defined, changed or set here"));
         }
+        if let Parsed::Statement(s) = &statement {
+            Shape::of(s.as_ref())?;
+        }
         let references = state.resolve_table_references(&statement).map_err(|e| Refused::invalid(format!("the query's tables cannot be told: {e}")))?;
         for t in references {
             let named = t.table().to_lowercase();
@@ -425,16 +441,73 @@ fn model_of(raw: &Value) -> Result<(Manifest, Models, BTreeSet<String>), Refused
         if let Some(columns) = model.get_mut("columns").and_then(Value::as_array_mut) {
             for c in columns.iter_mut().filter_map(Value::as_object_mut) {
                 c.remove("columnLevelAccessControl");
+                Shape::of_expression(&text(c, "expression"))?;
             }
         }
         names.insert(name.to_lowercase());
         datasets.insert(table);
+    }
+    for r in obj.get("relationships").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_object) {
+        Shape::of_expression(&text(r, "condition"))?;
     }
     if let Some(shared) = datasets.iter().find(|d| names.contains(*d)) {
         return Err(Refused::invalid(format!("a model and a dataset are both called {shared}: rename the model")));
     }
     let manifest: Manifest = serde_json::from_value(m).map_err(|e| Refused::invalid(format!("the semantic model is not a Wren manifest: {e}")))?;
     Ok((manifest, Models { names, catalog, schema }, datasets))
+}
+
+/// What a query or an expression reads and how deep its terms nest, walked before anything is planned and
+/// left as soon as either is past its bound.
+#[derive(Default)]
+struct Shape {
+    reads: usize,
+    depth: usize,
+}
+
+impl Visitor for Shape {
+    type Break = Refused;
+
+    fn pre_visit_relation(&mut self, _: &ObjectName) -> ControlFlow<Refused> {
+        self.reads += 1;
+        if self.reads > MOST_READS {
+            return ControlFlow::Break(Refused::invalid(format!("a query reads at most {MOST_READS} models, counting each time it reads one")));
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_expr(&mut self, _: &SqlExpr) -> ControlFlow<Refused> {
+        self.depth += 1;
+        if self.depth > MOST_DEPTH {
+            return ControlFlow::Break(Refused::invalid(format!("terms nest at most {MOST_DEPTH} deep (a + b + c is three deep)")));
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn post_visit_expr(&mut self, _: &SqlExpr) -> ControlFlow<Refused> {
+        self.depth -= 1;
+        ControlFlow::Continue(())
+    }
+}
+
+impl Shape {
+    fn of(v: &impl Visit) -> Result<(), Refused> {
+        match v.visit(&mut Shape::default()) {
+            ControlFlow::Break(refused) => Err(refused),
+            ControlFlow::Continue(()) => Ok(()),
+        }
+    }
+
+    /// A model's expression, parsed as Wren parses it. One that does not parse is Wren's to refuse.
+    fn of_expression(sql: &str) -> Result<(), Refused> {
+        if sql.len() > MOST_SQL {
+            return Err(Refused::new(413, format!("an expression is at most {MOST_SQL} characters")));
+        }
+        match Parser::new(&GenericDialect {}).try_with_sql(sql).and_then(|mut p| p.parse_expr()) {
+            Ok(e) if !sql.trim().is_empty() => Shape::of(&e),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// `listed` as `a` lets its reader see it: only the rows the rules allow, without the hidden columns. Its
