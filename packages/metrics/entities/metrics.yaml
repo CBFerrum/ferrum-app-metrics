@@ -31,6 +31,7 @@
     - {name: domain, type: data, in_list: true, in_filter: true, description: "Sales, Finance, People"}
     - {name: definition, type: json, widget: studio_query, description: "A Studio query with exactly one measure. Or leave it empty and compose the metric of others"}
     - {name: formula, type: data, label: Composed Of, description: "Other metrics by name, in brackets: [Revenue] / [Orders]. Each part is read with the reader's own rights; certified after its parts"}
+    - {name: external, type: json, label: External Query, description: "A Wren semantic model over external datasets and one query over it, asked of Metrics' engine: {\"model\": …, \"sql\": \"select sum(total) from orders\"}. Each dataset is an External Source here"}
     - {name: series_by, type: data, label: Series By, description: "The date field a series of it goes by, month by month or week by week: posting_date"}
     - {name: convert_to, type: link, to: Currency, label: Convert To, description: "Sum amounts in several currencies in this one, each row at the rate valid on its day. Leave it empty to sum them as they are"}
     - {name: currency_field, type: data, label: Currency Field, description: "The field linking each row to its currency: currency"}
@@ -49,6 +50,21 @@
     - {name: deprecate, label: Deprecate It, permission: write, condition: "doc.status != 'Deprecated'", params: [{name: replaced_by, type: link, to: Metric, label: Replaced By}]}
     - {name: snapshot, label: Record Its Value, permission: read, condition: "doc.status == 'Certified'"}
   list: {columns: [metric_name, domain, owner, status], sort: metric_name asc}
+
+- name: ExternalSource
+  label: External Source
+  label_plural: External Sources
+  kind: master
+  module: metrics
+  title_field: source_name
+  description: A dataset Metrics' engine reads for this workspace, as its operator lists it, with the rows and columns each reader sees of it and how fresh its data must be. An external metric reads only datasets described here.
+  fields:
+    - {name: source_name, type: data, required: true, unique: true, in_list: true, description: "The dataset's name on the engine, as a model's tableReference names it: orders_lake"}
+    - {name: description, type: text}
+    - {name: fresh_within_minutes, type: int, default: 1440, min: 0, label: Fresh Within (Minutes), in_list: true, description: "A value read from it is said to be stale once its data is older than this; 0, never"}
+    - {name: rows_by, type: json, label: Rows Each Reader Sees, description: "Empty: every row. {\"column\": \"owner\", \"by\": \"email\"}: the rows whose column is the reader's address. {\"column\": \"region\", \"by\": \"roles\", \"map\": {\"North Sales\": [\"North\"]}}: the rows whose column is a value the reader's roles map to. A list: every rule holds. Administrators see every row"}
+    - {name: hidden_columns, type: json, label: Columns For Some Roles, description: "{\"secret\": [\"Auditor\"]}: a column only those roles see. Administrators see every column"}
+  list: {columns: [source_name, fresh_within_minutes], sort: source_name asc}
 
 - name: MetricSnapshot
   label: Metric Value

@@ -14,6 +14,7 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
 | 🖥️ Interface | its own, at `/kpis/`: the certified metrics by domain, each with its value for the viewer, and the certified datasets with their addresses for a warehouse |
 | 🔌 Endpoints | `GET /api/app/metrics/value?metric=<name>`, `series?metric=<name>&bucket=month&periods=12`, `impact?metric=<name>`; the warehouse feed `GET /api/app/metrics/dataset?name=<name>&format=csv\|ndjson` and `GET /api/app/metrics/values?since=<time>`; `POST /api/app/metrics/import/wren` |
 | 🔐 Roles | Metric Author, Data Steward, Metric Reader |
+| 🛰️ Service | `ferrum-metrics-engine` (`engine/`): external datasets through Wren on DataFusion, run beside the server ([docs/engine.md](docs/engine.md)) |
 | 📜 Licence | AGPL-3.0-only |
 
 ## Highlights
@@ -38,6 +39,21 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
   never a total without that row; a read that would hold more currency-days than one read takes is
   refused rather than cut short. Only sums convert, a formula keeps to one currency, and a currency on
   child rows, which would count a document once per row, is refused when the metric is saved.
+- **From external datasets.** A metric can be read from a data lake's CSV or Parquet files instead of the
+  records (`external`): a Wren semantic model over the lake's datasets and one query over its models. Metrics'
+  engine runs it: a service of its own beside the server, planning the query through the model with Wren's
+  engine (pinned) and running it on DataFusion. Each dataset is an **External Source** a Data Steward
+  describes. It says which rows each reader sees (theirs by address, or the values their roles map to), which
+  columns only some roles see, and how fresh its data must be.
+  - The engine is asked with what that reader may see and never more. It reads each dataset through a table
+    that filters its rows and leaves out those columns in its own scan, so no model, rename, calculated column
+    or relationship reaches past them.
+  - A query is one SELECT over the model's models. Anything else is refused, and so is what Wren cannot plan
+    exactly. Time, memory, rows and concurrency are bounded.
+  - A value read from data older than its source allows says so (`stale`), as does anything composed of it.
+  - The query is checked when the metric is saved, on its author's own view of the datasets, and must answer
+    with one number. Certification fixes it as it fixes a query of the records.
+  - See [docs/engine.md](docs/engine.md).
 - **From Wren.** `POST /api/app/metrics/import/wren` takes a Wren semantic model (MDL) and reviews each
   cube measure against the metrics defined here: `new`, `same`, `duplicate` (another name already means
   it), `conflict` (that name means something else, and stays so) or `unsupported`, with the reason. Only
@@ -123,6 +139,9 @@ cd ui && npm run build && npm run check
 
 | Version | Highlights |
 |---|---|
+| **0.7.0** | Metrics read from external datasets through Metrics' engine (Wren on DataFusion), with each reader's rows and columns and fresh-or-stale said; External Sources. |
+| **0.6.0** | Currencies by the day's rate, fiscal series, kept values that keep their meaning and stay their readers', and Wren models reviewed into drafts. |
+| **0.5.0** | Composed metrics, series with the period not yet over marked partial, and impact. |
 | **0.4.5** | Its names in Arabic and Hindi; the last English sentences translated. |
 | **0.4.4** | The assistant knows its records. |
 | **0.4.3** | Rebuilt with Ferrum-Frontend 5b22e7b: its own words in Arabic and Hindi. |
@@ -144,6 +163,12 @@ cd ui && npm run build && npm run check
 ## License
 
 AGPL-3.0-only. See [LICENSE](LICENSE).
+
+`tests/external_it.rs` runs the engine beside the kernel over HTTP: readers' rows and columns, a metric over a
+hidden column refused to an author who cannot see it, a composed metric of an external metric and one of the
+records, fresh and stale, and the engine gone. `engine/tests/` checks the engine alone: Wren's models,
+relationships and calculated columns answered exactly; what has no exact meaning refused; the sandbox, the
+bounds and the token.
 
 `tests/currency_it.rs` checks sales in four currencies against numbers worked out by hand: a rate on
 its own first day, the inverse of an opposite rate, a refund dated back across a fiscal year, ties

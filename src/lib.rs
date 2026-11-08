@@ -14,12 +14,16 @@
 //!   read with their own rights and kept as values.
 //! * `wren`: a Wren semantic model reviewed against the metrics defined here, its accepted measures
 //!   brought in as drafts; never a second authority, never an approximation.
+//! * `engine`: metrics read from external datasets through a Wren semantic model, asked of Metrics' engine
+//!   (the service in `engine/`) with what each reader may see of each dataset, and said to be stale when
+//!   their data is older than their source allows.
 //!
 //! This app's own design; no code was copied (docs/PROVENANCE.md). Hooks are registered per entity,
 //! so a workspace without the `metrics` package never runs them.
 
 mod dataset;
 mod delivery;
+mod engine;
 mod metric;
 mod site;
 mod warehouse;
@@ -47,7 +51,8 @@ pub fn register(hooks: &mut HookRegistry) {
     hooks
         .register("Metric", Arc::new(metric::MetricHook))
         .register("Dataset", Arc::new(dataset::DatasetHook))
-        .register("MetricSubscription", Arc::new(delivery::SubscriptionHook));
+        .register("MetricSubscription", Arc::new(delivery::SubscriptionHook))
+        .register("ExternalSource", Arc::new(engine::SourceHook));
     hooks.add_site("metrics", Arc::new(site::MetricsSite));
 }
 
