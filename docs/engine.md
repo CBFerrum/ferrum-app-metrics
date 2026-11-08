@@ -40,13 +40,18 @@ It is stale when any part is, and has no value when any part has none.
   `dataSource`. These are taken out before a model runs: the rules are Ferrum's, and the data is read here.
 - **Too deep or too wide to plan quickly.** Planning cannot be stopped midway, so before anything is planned a
   query is held to terms nested at most 100 deep (`a + b + c` is three deep) and at most 32 models read,
-  counting each time one is read. A model's calculated columns and relationships are held to the same depth.
+  counting each time one is read. A model's calculated columns and relationships are held to the same depth,
+  and a semantic model holds at most 32 models, so the longest chain of relationships through it is planned in
+  moments.
   A long list of values is fine. Each of the engine's threads has a 64 MiB stack, used only as deep as a query
   goes, and DataFusion's own recursion grows its stack as it needs: no query can overflow it and take the
   process down.
 - **Too much.** Each query runs within the operator's limits. When one is exceeded, nothing is answered:
   - rows: the answer is cut and says so;
-  - time: the query is stopped (504);
+  - time: the caller is told so (504) once its wait for a turn and its time are up, whether or not the query's
+    work stops to yield. Each query runs as a task of its own, stopped at its next yield, and it keeps its turn
+    until it has stopped, so slow queries never hold more than the turns there are. A query that fails
+    unexpectedly is refused (500), and the engine goes on;
   - memory: a query needing more fails, since nothing spills to disk (422);
   - concurrency: past the queries allowed at once, a query waits its turn, then is told the engine is busy (503).
 

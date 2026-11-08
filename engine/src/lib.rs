@@ -31,7 +31,7 @@ use axum::{Json, Router};
 use datafusion::arrow::datatypes::{Schema, SchemaRef};
 use datafusion::arrow::util::display::array_value_to_string;
 use datafusion::catalog::Session;
-use datafusion::common::config::Dialect;
+use datafusion::common::config::{ConfigNonZeroUsize, Dialect};
 use datafusion::common::{Column, DFSchema};
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::error::DataFusionError;
@@ -59,6 +59,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{Semaphore, SemaphorePermit};
+use tokio::task::JoinHandle;
 use wren_core::mdl::manifest::Manifest;
 use wren_core::mdl::{AnalyzedWrenMDL, transform_sql_with_ctx};
 
@@ -69,7 +70,11 @@ pub const MOST_BODY: usize = 1 << 20;
 /// well within this. Reserved, and used only as deep as a query goes.
 pub const STACK: usize = 64 << 20;
 const MOST_SQL: usize = 20_000;
-const MOST_MODELS: usize = 200;
+/// A metric's semantic model holds the models it reads; a chain of relationships through them is planned as
+/// one, so they are held to as many as a query may read.
+const MOST_MODELS: usize = 32;
+/// How deep Wren's planned SQL may nest: the largest semantic model's longest chain of relationships, planned.
+const PLANNED_DEPTH: usize = 512;
 /// The models a query reads, counting each time it reads one, and how deep its terms nest (`a + b + c` is three
 /// deep): more than a metric needs, and little enough that planning, which cannot be stopped midway, stays short.
 /// A model's calculated columns and relationships are held to the same depth.
@@ -325,6 +330,30 @@ impl Engine {
         .await
     }
 
+    /// As `query`, answered or refused within its wait for a turn and its time, whether or not its work stops
+    /// to yield: it runs as a task of its own, which keeps its turn until it has stopped, so slow queries never
+    /// hold more than the turns there are. A query that panics is refused, and the engine goes on.
+    pub async fn answer(self: Arc<Self>, q: Query) -> Result<Answer, Refused> {
+        let (bound, millis) = (self.bound(), self.config.limits.millis);
+        within(bound, millis, tokio::spawn(async move { self.query(&q).await })).await
+    }
+
+    /// As `check`, within the same bound as `answer`.
+    pub async fn checked(self: Arc<Self>, q: Query) -> Result<Checked, Refused> {
+        let (bound, millis) = (self.bound(), self.config.limits.millis);
+        within(bound, millis, tokio::spawn(async move { self.check(&q).await })).await
+    }
+
+    /// How long a query may run once it has its turn.
+    fn time(&self) -> Duration {
+        Duration::from_millis(self.config.limits.millis)
+    }
+
+    /// How long a caller waits at most: for a turn, then for the query's time.
+    fn bound(&self) -> Duration {
+        Duration::from_millis(self.config.limits.wait_millis) + self.time() + Duration::from_millis(50)
+    }
+
     async fn turn(&self) -> Result<SemaphorePermit<'_>, Refused> {
         let busy = || Refused::new(503, "the engine is busy: try again shortly");
         tokio::time::timeout(Duration::from_millis(self.config.limits.wait_millis), self.permits.acquire()).await.map_err(|_| busy())?.map_err(|_| busy())
@@ -332,9 +361,7 @@ impl Engine {
 
     async fn bounded<T>(&self, work: impl Future<Output = Result<T, Refused>>) -> Result<T, Refused> {
         let millis = self.config.limits.millis;
-        tokio::time::timeout(Duration::from_millis(millis), work)
-            .await
-            .map_err(|_| Refused::new(504, format!("the query ran longer than {millis} ms, and was stopped")))?
+        tokio::time::timeout(self.time(), work).await.map_err(|_| Refused::new(504, format!("the query ran longer than {millis} ms, and was stopped")))?
     }
 
     /// A context of the query's own, bounded in memory, spilling nothing.
@@ -392,6 +419,10 @@ impl Engine {
         let sql = transform_sql_with_ctx(&ctx, Arc::new(mdl), &[], Arc::new(HashMap::new()), &q.sql)
             .await
             .map_err(|e| Refused::from_engine(&e, "the query does not plan through the semantic model"))?;
+        // Wren's SQL nests a subquery for each model and relationship it reads, so it may be parsed deeper than
+        // the reader's own query was, above; DataFusion's parser grows its stack as it needs.
+        let deeper = ConfigNonZeroUsize::try_new(PLANNED_DEPTH).map_err(|e| Refused::new(500, format!("the engine cannot set a query up: {e}")))?;
+        ctx.state_ref().write().config_mut().options_mut().sql_parser.recursion_limit = deeper;
         Ok(Prepared { ctx, sql, written })
     }
 }
@@ -597,6 +628,19 @@ fn row_rule(r: &RowRule) -> Expr {
     }
 }
 
+/// `task`'s outcome, or, once `bound` has passed, a refusal for running longer than `millis`; the task is told
+/// to stop, and does at its next yield.
+async fn within<T>(bound: Duration, millis: u64, mut task: JoinHandle<Result<T, Refused>>) -> Result<T, Refused> {
+    match tokio::time::timeout(bound, &mut task).await {
+        Ok(Ok(done)) => done,
+        Ok(Err(e)) => Err(Refused::new(500, format!("the query failed: {e}"))),
+        Err(_) => {
+            task.abort();
+            Err(Refused::new(504, format!("the query ran longer than {millis} ms, and was stopped")))
+        }
+    }
+}
+
 /// When the newest file at `path` was written.
 fn written_at(path: &Path) -> Option<String> {
     let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
@@ -661,7 +705,7 @@ fn parse(headers: &HeaderMap, s: &Shared, body: &Bytes) -> Result<Query, (u16, S
 
 async fn query(State(s): State<Arc<Shared>>, headers: HeaderMap, body: Bytes) -> Response {
     match parse(&headers, &s, &body) {
-        Ok(q) => match s.engine.query(&q).await {
+        Ok(q) => match Arc::clone(&s.engine).answer(q).await {
             Ok(a) => Json(a).into_response(),
             Err(r) => refusal(r.status, r.message),
         },
@@ -671,7 +715,7 @@ async fn query(State(s): State<Arc<Shared>>, headers: HeaderMap, body: Bytes) ->
 
 async fn check(State(s): State<Arc<Shared>>, headers: HeaderMap, body: Bytes) -> Response {
     match parse(&headers, &s, &body) {
-        Ok(q) => match s.engine.check(&q).await {
+        Ok(q) => match Arc::clone(&s.engine).checked(q).await {
             Ok(c) => Json(c).into_response(),
             Err(r) => refusal(r.status, r.message),
         },
@@ -682,6 +726,40 @@ async fn check(State(s): State<Arc<Shared>>, headers: HeaderMap, body: Bytes) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// The bound a caller waits within holds for work that never stops to yield, as no query the engine takes is
+    /// known to do; the work is told to stop; and work that panics is refused.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_caller_is_refused_on_time_whatever_the_work() {
+        let started = std::time::Instant::now();
+        let unyielding = tokio::spawn(async {
+            std::thread::sleep(Duration::from_millis(1500));
+            Ok::<(), Refused>(())
+        });
+        let r = within(Duration::from_millis(100), 100, unyielding).await;
+        assert_eq!(r.map_err(|r| (r.status, r.message)), Err((504, "the query ran longer than 100 ms, and was stopped".to_string())));
+        assert!(started.elapsed() < Duration::from_millis(1000), "refused after {:?}", started.elapsed());
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let counting = Arc::clone(&ticks);
+        let yielding = tokio::spawn(async move {
+            while counting.fetch_add(1, Ordering::SeqCst) < usize::MAX {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            Ok::<(), Refused>(())
+        });
+        assert_eq!(within(Duration::from_millis(50), 50, yielding).await.map_err(|r| r.status), Err(504));
+        let then = ticks.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(ticks.load(Ordering::SeqCst) <= then + 1, "the work was told to stop, and stopped");
+        let panicking = tokio::spawn(async move {
+            if started.elapsed() < Duration::from_secs(3600) {
+                panic!("a query's own failure");
+            }
+            Ok::<(), Refused>(())
+        });
+        assert_eq!(within(Duration::from_secs(5), 100, panicking).await.map_err(|r| r.status), Err(500));
+    }
 
     #[test]
     fn tokens_must_match_whole_and_names_are_plain() {
