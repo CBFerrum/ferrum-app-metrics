@@ -11,7 +11,7 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
 |---|---|
 | 📊 App | `metrics`, native, in the server |
 | 🧩 Package | `metrics` |
-| 🖥️ Interface | its own, at `/kpis/`: the certified metrics by domain, each with its value for the viewer, and the certified datasets with their addresses for a warehouse |
+| 🖥️ Interface | its own, at `/kpis/`: the certified metrics by domain, each with its value for the viewer (saying when it is stale, or why there is none now), and the certified datasets with their addresses for a warehouse |
 | 🔌 Endpoints | `GET /api/app/metrics/value?metric=<name>`, `series?metric=<name>&bucket=month&periods=12`, `impact?metric=<name>`; the warehouse feed `GET /api/app/metrics/dataset?name=<name>&format=csv\|ndjson` and `GET /api/app/metrics/values?since=<time>`; `POST /api/app/metrics/import/wren` |
 | 🔐 Roles | Metric Author, Data Steward, Metric Reader |
 | 🛰️ Service | `ferrum-metrics-engine` (`engine/`): external datasets through Wren on DataFusion, run beside the server ([docs/engine.md](docs/engine.md)) |
