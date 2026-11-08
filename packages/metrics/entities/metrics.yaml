@@ -23,13 +23,15 @@
   kind: master
   module: metrics
   title_field: metric_name
-  description: A number defined once as a Studio query of one measure. Certified by a steward who does not own it, it stays certified while its definition does; everyone reads it with their own rights.
+  description: A number defined once, as a Studio query of one measure or a formula over other metrics. Certified by a steward who does not own it, it stays certified while its definition does; everyone reads it with their own rights.
   fields:
     - {name: metric_name, type: data, required: true, unique: true, in_list: true}
     - {name: description, type: text}
     - {name: owner, type: email, read_only: true, no_copy: true, in_list: true, in_filter: true}
     - {name: domain, type: data, in_list: true, in_filter: true, description: "Sales, Finance, People"}
-    - {name: definition, type: json, widget: studio_query, required: true, description: "A Studio query with exactly one measure"}
+    - {name: definition, type: json, widget: studio_query, description: "A Studio query with exactly one measure. Or leave it empty and compose the metric of others"}
+    - {name: formula, type: data, label: Composed Of, description: "Other metrics by name, in brackets: [Revenue] / [Orders]. Each part is read with the reader's own rights; certified after its parts"}
+    - {name: series_by, type: data, label: Series By, description: "The date field a series of it goes by, month by month or week by week: posting_date"}
     - {name: unit, type: data}
     - {name: terms, type: table, of: MetricTerm}
     - {name: uses, type: text, read_only: true, no_copy: true, label: Lineage, description: "The record and fields it reads"}
