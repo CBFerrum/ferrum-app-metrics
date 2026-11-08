@@ -49,8 +49,9 @@ Governed metrics and datasets for [Ferrum](https://github.com/CBFerrum/Ferrum), 
     that filters its rows and leaves out those columns in its own scan, so no model, rename, calculated column
     or relationship reaches past them.
   - A query is one SELECT over the model's models. Anything else is refused, and so is what Wren cannot plan
-    exactly. Time, memory, rows and concurrency are bounded, and so are how deep a query's terms nest and how
-    many models it reads, before anything is planned.
+    exactly. Time, memory, rows and concurrency are bounded, and so are how deep a query's terms nest, how
+    many models it reads and how many a semantic model holds, before anything is planned. A query's time holds
+    whether or not its work yields.
   - A value read from data older than its source allows says so (`stale`), as does anything composed of it.
   - The query is checked when the metric is saved, on its author's own view of the datasets, and must answer
     with one number. Certification fixes it as it fixes a query of the records.

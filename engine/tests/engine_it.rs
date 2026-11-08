@@ -14,6 +14,7 @@
 use ferrum_metrics_engine::{Allowed, Config, Dataset, Engine, Format, Limits, Query, RowRule};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// A lake of its own for each test, so one test's changes are not another's.
 fn lake(name: &str) -> PathBuf {
@@ -228,8 +229,17 @@ async fn time_memory_and_rows_are_bounded() {
     let explosive = "select a.id + 10 * b.id + 100 * c.id + 1000 * d.id + 10000 * e.id + 100000 * f.id + 1000000 * g.id + 10000000 * h.id + 100000000 * i.id + 1000000000 * j.id as k, count(*) \
         from orders a cross join orders b cross join orders c cross join orders d cross join orders e cross join orders f cross join orders g cross join orders h cross join orders i cross join orders j group by k";
     refused(&small, query(explosive, everything()), 422, "more memory than one query may hold").await;
-    let hasty = engine(&dir, Limits { millis: 1, ..Limits::default() });
-    refused(&hasty, query("select sum(total) from orders", everything()), 504, "longer than 1 ms").await;
+    // Longer than its time, whether or not its work stops to yield: refused once its turn's wait and its time are
+    // up, as the service runs it. Four orders crossed eleven times are four million rows to add up.
+    let hasty = Arc::new(engine(&dir, Limits { millis: 100, wait_millis: 100, ..Limits::default() }));
+    let terms = (0..11).map(|i| format!("o{i}.total")).collect::<Vec<_>>().join(" + ");
+    let slow = format!("select sum({terms}) from orders o0{}", (1..11).map(|i| format!(" cross join orders o{i}")).collect::<String>());
+    let started = std::time::Instant::now();
+    match hasty.answer(query(&slow, everything())).await {
+        Err(r) => assert!(r.status == 504 && r.message.contains("longer than 100 ms"), "{r}"),
+        Ok(a) => panic!("answered after {:?}: {a:?}", started.elapsed()),
+    }
+    assert!(started.elapsed() < std::time::Duration::from_millis(1500), "refused after {:?}", started.elapsed());
 }
 
 #[tokio::test]
@@ -292,5 +302,31 @@ fn a_deep_query_is_answered_or_refused_never_the_engine_lost() {
         refused(&e, query(&reading(33), everything()), 400, "reads at most 32 models").await;
         let unions = format!("select count(*) from ({})", vec!["select 1 as x from orders"; 33].join(" union all "));
         refused(&e, query(&unions, everything()), 400, "reads at most 32 models").await;
+        // The longest chain of relationships a semantic model can hold, each model's column read through the
+        // next: answered, every order once. One model more is refused.
+        let chain = |n: usize| {
+            let models: Vec<Value> = (0..n)
+                .map(|i| {
+                    let mut columns = vec![json!({"name": "id", "type": "integer"}), json!({"name": "total", "type": "double"})];
+                    if i + 1 < n {
+                        columns.push(json!({"name": "nxt", "type": format!("m{}", i + 1), "relationship": format!("r{i}")}));
+                        columns.push(json!({"name": "deep", "type": "double", "isCalculated": true, "expression": "nxt.deep"}));
+                    } else {
+                        columns.push(json!({"name": "deep", "type": "double", "isCalculated": true, "expression": "total"}));
+                    }
+                    json!({"name": format!("m{i}"), "tableReference": {"table": "orders_lake"}, "primaryKey": "id", "columns": columns})
+                })
+                .collect();
+            let relationships: Vec<Value> = (0..n.saturating_sub(1))
+                .map(|i| json!({"name": format!("r{i}"), "models": [format!("m{i}"), format!("m{}", i + 1)], "joinType": "ONE_TO_ONE", "condition": format!("m{i}.id = m{}.id", i + 1)}))
+                .collect();
+            json!({"catalog": "wren", "schema": "public", "models": models, "relationships": relationships})
+        };
+        let longest = Query { manifest: chain(32), ..query("select sum(deep) from m0", everything()) };
+        let started = std::time::Instant::now();
+        let answer = e.query(&longest).await.unwrap_or_else(|r| panic!("the longest chain: {r}"));
+        assert_eq!(answer.rows, vec![vec![Some("185.5".to_string())]], "{answer:?}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "planned and run in {:?}", started.elapsed());
+        refused(&e, Query { manifest: chain(33), ..query("select sum(deep) from m0", everything()) }, 400, "1 to 32 models").await;
     });
 }
