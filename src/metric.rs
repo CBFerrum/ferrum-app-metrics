@@ -8,15 +8,16 @@
 
 use crate::obj;
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use ferrum_calc::formula::Formula;
-use ferrum_domain::util::{elevated, id, s};
-use ferrum_kernel::{Ctx, Doc, DocHook, Error, HookCtx, Kernel, Result};
-use ferrum_studio::spec::{Bucket, Spec, TimeSeries};
-use rust_decimal::Decimal;
+use ferrum_domain::util::{elevated, id, s, sys};
+use ferrum_kernel::{Ctx, Doc, DocHook, Error, Filter, HookCtx, Kernel, Result, Tx};
+use ferrum_studio::spec::{Agg, Bucket, GroupBy, MAX_LIMIT, Spec, TimeSeries};
+use rust_decimal::{Decimal, RoundingStrategy};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use uuid::Uuid;
@@ -45,10 +46,11 @@ const MAX_DEPTH: usize = 8;
 /// Most metrics one formula may name.
 const MAX_PARTS: usize = 20;
 
-/// What a metric is: a Studio query of one measure, or a formula over other metrics by name
-/// (`[revenue] / [orders]`), worked out in exact decimals from each part's value for the reader.
+/// What a metric is: a Studio query of one measure (summing amounts in several currencies in one when
+/// it converts them), or a formula over other metrics by name (`[revenue] / [orders]`), worked out in
+/// exact decimals from each part's value for the reader.
 pub(crate) enum Kind {
-    Query(Box<Spec>),
+    Query(Box<Spec>, Option<Conversion>),
     Composed { text: String, formula: Formula, parts: Vec<String> },
 }
 
@@ -80,22 +82,241 @@ pub(crate) fn kind_of(doc: &Doc) -> Result<Kind> {
     match (formula, defined) {
         (Some(_), true) => Err(Error::field("formula", "a metric is a query or a formula over other metrics, not both")),
         (Some(text), false) => {
+            if conversion_of(doc)?.is_some() {
+                return Err(Error::field("convert_to", "a composed metric is converted by its parts, each its own"));
+            }
             let parts = parts_of(text)?;
             let formula = Formula::parse(text, &|name| Ok(name.trim().to_string())).map_err(|e| Error::field("formula", e))?;
             Ok(Kind::Composed { text: text.to_string(), formula, parts })
         }
-        (None, _) => Ok(Kind::Query(Box::new(spec_of(doc)?))),
+        (None, _) => Ok(Kind::Query(Box::new(spec_of(doc)?), conversion_of(doc)?)),
     }
 }
 
 /// What certification fixes, whatever the metric is.
 pub(crate) fn fingerprint_of(kind: &Kind) -> String {
     match kind {
-        Kind::Query(spec) => fingerprint(spec),
+        // A metric that does not convert keeps the fingerprint it was certified with.
+        Kind::Query(spec, None) => fingerprint(spec),
+        Kind::Query(spec, Some(c)) => hex::encode(Sha256::digest(
+            format!("{CONVERT_RULE}\n{}\n{}\n{}\n{}\n{}", fingerprint(spec), c.to, c.currency_field, c.date_field, c.places).as_bytes(),
+        )),
         Kind::Composed { text, .. } => {
             hex::encode(Sha256::digest(format!("ferrum.metrics.composed/1\n{}", text.split_whitespace().collect::<String>()).as_bytes()))
         }
     }
+}
+
+/// What a converted metric's fingerprint names besides its query: how it converts. Certifying fixes the
+/// rule with the definition, so another rule (`/2`) puts a metric back in draft rather than changing
+/// what a certified number means.
+const CONVERT_RULE: &str =
+    "ferrum.metrics.convert/1: each row at the latest rate valid on its day, direct or else inverse, exact products, each total rounded half to even";
+
+/// Most rates one pair of currencies may have for a read to take them all (the kernel's most rows).
+const MOST_RATES: u32 = 100_000;
+
+/// How a metric summing amounts in several currencies reads them in one: each row at the rate valid on
+/// its own day (the latest from that day or before, direct or else inverse, as the platform converts
+/// documents: `ferrum_domain::util::exchange_rate`), products kept exact, each total rounded half to
+/// even to `places`. A row in a currency without a rate by its day leaves the metric without a value,
+/// said so, never a total without that row.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Conversion {
+    pub to: Uuid,
+    pub currency_field: String,
+    pub date_field: String,
+    pub places: u32,
+}
+
+pub(crate) fn conversion_of(doc: &Doc) -> Result<Option<Conversion>> {
+    let set = |f: &str| s(doc, f).map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
+    let (currency_field, date_field) = (set("currency_field"), set("rate_date_field"));
+    let Some(to) = set("convert_to") else {
+        return match currency_field.or(date_field) {
+            Some(_) => Err(Error::field("convert_to", "say which currency to convert to, or clear the currency field and the rate date")),
+            None => Ok(None),
+        };
+    };
+    let to = to.parse().map_err(|_| Error::field("convert_to", "is not a currency"))?;
+    let currency_field = currency_field.ok_or_else(|| Error::field("currency_field", "say which field holds each row's currency: currency"))?;
+    let date_field = date_field.ok_or_else(|| Error::field("rate_date_field", "say which date picks each row's rate: posting_date"))?;
+    let places = match doc.get("round_to") {
+        None | Some(Value::Null) => 2,
+        Some(v) => v.as_u64().or_else(|| v.as_str()?.trim().parse().ok()).filter(|p| *p <= 6).ok_or_else(|| Error::field("round_to", "is 0 to 6 places"))?,
+    };
+    Ok(Some(Conversion { to, currency_field, date_field, places: u32::try_from(places).unwrap_or(2) }))
+}
+
+/// A converted total, rounded half to even (a tie goes to the even digit, so ties do not all lean one way).
+fn rounded(v: Decimal, places: u32) -> Decimal {
+    v.round_dp_with_strategy(places, RoundingStrategy::MidpointNearestEven)
+}
+
+/// Amounts added exactly, or no value rather than a wrong one when they outgrow what a decimal holds.
+fn total(me: &str, values: impl IntoIterator<Item = Decimal>) -> Result<Decimal> {
+    values
+        .into_iter()
+        .try_fold(Decimal::ZERO, |t, v| t.checked_add(v))
+        .ok_or_else(|| Error::invalid(format!("{me} has no value: its total is too large to hold exactly")))
+}
+
+/// A cell's number, exact; nothing counted is zero.
+fn number(v: &Value) -> Decimal {
+    match v {
+        Value::String(s) => s.parse().unwrap_or_default(),
+        Value::Number(n) => n.to_string().parse().unwrap_or_default(),
+        _ => Decimal::ZERO,
+    }
+}
+
+/// The record a field path of `entity` ends at, through links and child tables: `customer.currency`.
+fn path_target(ctx: &Ctx, entity: &str, path: &str) -> Option<String> {
+    let mut at = entity.to_string();
+    for part in path.split('.') {
+        at = reached(ctx, &at, part)?;
+    }
+    Some(at)
+}
+
+/// A converted metric's query summed by currency and by the day picking the rate, and by `also`'s day
+/// (a series going by another date) when given: as many groups as one read holds.
+fn grouped(spec: &Spec, c: &Conversion, also: Option<&str>) -> Spec {
+    let mut g = spec.clone();
+    let by_day = |f: &str| GroupBy { field: f.to_string(), bucket: Some(Bucket::Day), label: None };
+    g.group_by = vec![GroupBy { field: c.currency_field.clone(), bucket: None, label: None }, by_day(&c.date_field)];
+    g.group_by.extend(also.map(by_day));
+    g.limit = Some(MAX_LIMIT);
+    g.sort.clear();
+    g
+}
+
+/// A read holding every row it was asked for: one cut short at Studio's most rows would give a total
+/// without some of them, so it is refused instead.
+fn whole(out: Value, me: &str) -> Result<Value> {
+    if out["meta"]["truncated"] == json!(true) {
+        return Err(Error::invalid(format!(
+            "{me} has no value: it converts more than {MAX_LIMIT} currency-days in one read; narrow its definition with a date range"
+        )));
+    }
+    Ok(out)
+}
+
+/// One group of a converted metric's rows: its currency, the day picking its rate, the day its period
+/// goes by (the same unless a series goes by another date), and its sum.
+struct Group {
+    currency: Uuid,
+    rate_day: NaiveDate,
+    day: NaiveDate,
+    sum: Decimal,
+}
+
+/// A converted metric's rows by currency and day, for `ctx` with its own rights, only from `range` of
+/// the day a series goes by when given.
+async fn groups(k: &Kernel, ctx: &Ctx, me: &str, spec: &Spec, c: &Conversion, range: Option<(&str, NaiveDate, NaiveDate)>) -> Result<Vec<Group>> {
+    let also = range.map(|(f, ..)| f).filter(|f| *f != c.date_field);
+    let mut g = grouped(spec, c, also);
+    if let Some((f, from, to)) = range {
+        let after = to.succ_opt().unwrap_or(to);
+        g.and_filters(&json!([[f, ">=", from.to_string()], [f, "<", after.to_string()]]))?;
+    }
+    let out = whole(ferrum_studio::run::run(k, ctx, &g).await?, me)?;
+    let measure = out["columns"].as_array().and_then(|c| c.last()).and_then(|c| c["name"].as_str()).unwrap_or_default().to_string();
+    let rate_col = format!("day({})", c.date_field);
+    let day_col = also.map_or_else(|| rate_col.clone(), |f| format!("day({f})"));
+    let missing = |what: &str| Error::invalid(format!("{me} has no value: some of its rows have no {what}"));
+    let day = |v: &Value| v.as_str().and_then(|t| t.get(..10)?.parse::<NaiveDate>().ok());
+    out["rows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| {
+            Ok(Group {
+                currency: r[&c.currency_field].as_str().and_then(|v| v.parse().ok()).ok_or_else(|| missing(&c.currency_field))?,
+                rate_day: day(&r[&rate_col]).ok_or_else(|| missing(&c.date_field))?,
+                day: day(&r[&day_col]).ok_or_else(|| missing(also.unwrap_or(&c.date_field)))?,
+                sum: number(&r[&measure]),
+            })
+        })
+        .collect()
+}
+
+/// Every rate from `from` to `to`, by the day it is valid from, oldest first: all of them, or refused.
+async fn rates(k: &Kernel, system: &Ctx, tx: &mut Tx, from: Uuid, to: Uuid) -> Result<Vec<(NaiveDate, Decimal)>> {
+    let pair = [Filter::eq("from_currency", from.to_string()), Filter::eq("to_currency", to.to_string())];
+    let found = k.find_tx(system, tx, "ExchangeRate", &pair, Some("valid_from asc"), MOST_RATES).await?;
+    if found.len() >= MOST_RATES as usize {
+        return Err(Error::invalid(format!("more than {MOST_RATES} exchange rates between two currencies: too many to read at once")));
+    }
+    Ok(found.iter().filter_map(|r| Some((s(r, "valid_from")?.get(..10)?.parse().ok()?, ferrum_domain::util::d(r, "rate")))).collect())
+}
+
+/// The rate on `day`: the latest direct one valid from that day or before, or else the inverse of the
+/// latest inverse one, exactly as `ferrum_domain::util::exchange_rate` takes it for a document.
+fn rate_on(direct: &[(NaiveDate, Decimal)], inverse: &[(NaiveDate, Decimal)], day: NaiveDate) -> Option<Decimal> {
+    let latest = |list: &[(NaiveDate, Decimal)]| list.partition_point(|(from, _)| *from <= day).checked_sub(1).map(|i| list[i].1);
+    latest(direct).or_else(|| latest(inverse).filter(|r| !r.is_zero()).map(|r| (Decimal::ONE / r).round_dp(9)))
+}
+
+/// A currency's code, for saying which rate is missing.
+async fn code(k: &Kernel, system: &Ctx, tx: &mut Tx, currency: Uuid) -> String {
+    match k.get_tx(system, tx, "Currency", currency, false).await {
+        Ok(c) => s(&c, "code").unwrap_or("a currency").to_string(),
+        Err(_) => currency.to_string(),
+    }
+}
+
+/// Each group's sum in the metric's currency, with the day its period goes by: exact, or no value when
+/// a group has no rate by its day. The rates are what the metric means, so they are read whoever reads it.
+async fn convert(k: &Kernel, ctx: &Ctx, me: &str, c: &Conversion, groups: Vec<Group>) -> Result<Vec<(NaiveDate, Decimal)>> {
+    let system = sys(ctx);
+    let mut tx = k.db.tenant_tx(ctx.tenant).await?;
+    let mut known: HashMap<Uuid, (Vec<(NaiveDate, Decimal)>, Vec<(NaiveDate, Decimal)>)> = HashMap::new();
+    let mut out = Vec::with_capacity(groups.len());
+    for g in groups {
+        if g.currency == c.to {
+            out.push((g.day, g.sum));
+            continue;
+        }
+        let (direct, inverse) = match known.entry(g.currency) {
+            Entry::Occupied(e) => e.into_mut(),
+            Entry::Vacant(e) => e.insert((rates(k, &system, &mut tx, g.currency, c.to).await?, rates(k, &system, &mut tx, c.to, g.currency).await?)),
+        };
+        let Some(rate) = rate_on(direct, inverse, g.rate_day) else {
+            let (from, to) = (code(k, &system, &mut tx, g.currency).await, code(k, &system, &mut tx, c.to).await);
+            return Err(Error::invalid(format!(
+                "{me} has no value: no exchange rate from {from} to {to} on or before {}; add one under Exchange Rate",
+                g.rate_day
+            )));
+        };
+        let amount = g.sum.checked_mul(rate).ok_or_else(|| Error::invalid(format!("{me} has no value: an amount is too large to convert exactly")))?;
+        out.push((g.day, amount));
+    }
+    tx.commit().await?;
+    Ok(out)
+}
+
+/// A converted metric checked when it is saved: it sums an amount, by a field linking each row to its
+/// currency and a date picking the rate, into a currency that exists, and grouped so its query still
+/// makes sense to its author's rights (a currency on child rows would count the parent once per row).
+async fn check_conversion(hc: &mut HookCtx<'_>, spec: &Spec, c: &Conversion) -> Result<()> {
+    if spec.measures.first().map(|m| m.func) != Some(Agg::Sum) {
+        return Err(Error::field("convert_to", "a converted metric sums an amount: counts, averages, least and most are not converted"));
+    }
+    if path_target(hc.ctx, &spec.entity, &c.currency_field).as_deref() != Some("Currency") {
+        return Err(Error::field("currency_field", format!("{} does not link to a currency", c.currency_field)));
+    }
+    ferrum_studio::query::compile(hc.ctx, &grouped(spec, c, None)).map_err(|e| Error::field("definition", format!("does not run by currency and day: {e}")))?;
+    if hc.kernel.get_tx(&elevated(hc.ctx), hc.tx, "Currency", c.to, false).await.is_err() {
+        return Err(Error::field("convert_to", "is not a currency here"));
+    }
+    Ok(())
+}
+
+/// What a metric meant when it was read, kept with the value: its query or formula, and how it converts.
+pub(crate) fn meaning(doc: &Doc) -> Value {
+    let keys = ["definition", "formula", "convert_to", "currency_field", "rate_date_field", "round_to"];
+    Value::Object(keys.iter().filter_map(|k| doc.get(*k).filter(|v| !v.is_null() && *v != &json!("")).map(|v| ((*k).to_string(), v.clone()))).collect())
 }
 
 /// The metric named `name` in `ctx`'s workspace, whoever may read it.
@@ -129,9 +350,11 @@ pub(crate) async fn used_by(k: &Kernel, ctx: &Ctx, name: &str) -> Result<Vec<Str
     Ok(out.into_iter().collect())
 }
 
-/// A formula's parts must be metrics, never itself, even by way of others, none deprecated.
+/// A formula's parts must be metrics, never itself, even by way of others, none deprecated, and those
+/// that convert money all into one currency.
 async fn check_parts(k: &Kernel, ctx: &Ctx, me: &str, parts: &[String]) -> Result<()> {
     let mut todo: Vec<(String, Vec<String>)> = parts.iter().map(|p| (p.clone(), vec![me.to_string(), p.clone()])).collect();
+    let mut currencies: BTreeMap<Uuid, String> = BTreeMap::new();
     while let Some((part, path)) = todo.pop() {
         if part.eq_ignore_ascii_case(me) {
             return Err(Error::field("formula", format!("a metric is not made of itself, even by way of others: {}", path.join(" → "))));
@@ -144,6 +367,13 @@ async fn check_parts(k: &Kernel, ctx: &Ctx, me: &str, parts: &[String]) -> Resul
         };
         if s(&doc, "status") == Some("Deprecated") {
             return Err(Error::field("formula", format!("{part} is deprecated")));
+        }
+        if let Ok(Some(c)) = conversion_of(&doc) {
+            currencies.entry(c.to).or_insert_with(|| part.clone());
+            if currencies.len() > 1 {
+                let names: Vec<&str> = currencies.values().map(String::as_str).collect();
+                return Err(Error::field("formula", format!("{} convert to different currencies: a formula keeps to one", names.join(" and "))));
+            }
         }
         if let Some(text) = s(&doc, "formula").filter(|f| !f.trim().is_empty()) {
             for next in parts_of(text)? {
@@ -261,10 +491,14 @@ type Valued<'a> = Pin<Box<dyn Future<Output = Result<Decimal>> + Send + 'a>>;
 
 fn value_at<'a>(k: &'a Kernel, ctx: &'a Ctx, doc: &'a Doc, depth: usize) -> Valued<'a> {
     Box::pin(async move {
+        let me = s(doc, "metric_name").unwrap_or("this metric").to_string();
         match kind_of(doc)? {
-            Kind::Query(spec) => query_value(k, ctx, &spec).await,
+            Kind::Query(spec, None) => query_value(k, ctx, &spec).await,
+            Kind::Query(spec, Some(c)) => {
+                let converted = convert(k, ctx, &me, &c, groups(k, ctx, &me, &spec, &c, None).await?).await?;
+                Ok(rounded(total(&me, converted.into_iter().map(|(_, v)| v))?, c.places))
+            }
             Kind::Composed { formula, parts, .. } => {
-                let me = s(doc, "metric_name").unwrap_or("this metric").to_string();
                 if depth >= MAX_DEPTH {
                     return Err(Error::invalid(format!("{me} is composed more than {MAX_DEPTH} deep")));
                 }
@@ -288,11 +522,7 @@ async fn query_value(k: &Kernel, ctx: &Ctx, spec: &Spec) -> Result<Decimal> {
     let out = ferrum_studio::run::run(k, ctx, spec).await?;
     let key = out["columns"].as_array().and_then(|c| c.last()).and_then(|c| c["name"].as_str()).unwrap_or_default().to_string();
     let cell = out["rows"].as_array().and_then(|r| r.first()).map(|r| r[&key].clone()).unwrap_or(Value::Null);
-    Ok(match cell {
-        Value::String(s) => s.parse().unwrap_or_default(),
-        Value::Number(n) => n.to_string().parse().unwrap_or_default(),
-        _ => Decimal::ZERO,
-    })
+    Ok(number(&cell))
 }
 
 /// One period of a metric's series. `partial`: the period is not over, so its value is so far.
@@ -303,17 +533,25 @@ pub(crate) struct Point {
     pub partial: bool,
 }
 
-/// The first day of the period `back` periods before the one holding `today`.
-pub(crate) fn period_start(bucket: Bucket, today: chrono::NaiveDate, back: u32) -> Option<chrono::NaiveDate> {
-    use chrono::{Datelike, Months, NaiveDate};
-    Some(match bucket {
-        Bucket::Day => today - chrono::Duration::days(i64::from(back)),
-        Bucket::Week => today - chrono::Duration::days(i64::from(today.weekday().num_days_from_monday()) + 7 * i64::from(back)),
-        Bucket::Month => NaiveDate::from_ymd_opt(today.year(), today.month(), 1)?.checked_sub_months(Months::new(back))?,
-        Bucket::Quarter => NaiveDate::from_ymd_opt(today.year(), (today.month0() / 3) * 3 + 1, 1)?.checked_sub_months(Months::new(3 * back))?,
-        Bucket::Year => NaiveDate::from_ymd_opt(today.year() - i32::try_from(back).ok()?, 1, 1)?,
-        Bucket::FiscalQuarter | Bucket::FiscalYear => return None,
-    })
+/// `day` moved by `n` periods of `bucket`, forward or (negative) back. From a period's first day, the
+/// first day of another.
+fn shift(bucket: Bucket, day: NaiveDate, n: i32) -> Option<NaiveDate> {
+    use chrono::{Days, Months};
+    let (days, months) = match bucket {
+        Bucket::Day => (1, 0),
+        Bucket::Week => (7, 0),
+        Bucket::Month => (0, 1),
+        Bucket::Quarter | Bucket::FiscalQuarter => (0, 3),
+        Bucket::Year | Bucket::FiscalYear => (0, 12),
+    };
+    let (days, months) = (Days::new(u64::from(days * n.unsigned_abs())), Months::new(months * n.unsigned_abs()));
+    if n >= 0 { day.checked_add_days(days)?.checked_add_months(months) } else { day.checked_sub_days(days)?.checked_sub_months(months) }
+}
+
+/// The first day of the period `back` periods before the one holding `today`, fiscal periods starting in
+/// the workspace's fiscal start month `fy` (as Studio buckets them).
+pub(crate) fn period_start(bucket: Bucket, today: NaiveDate, back: u32, fy: u32) -> Option<NaiveDate> {
+    shift(bucket, bucket.start(today, fy), -i32::try_from(back).ok()?)
 }
 
 type Series<'a> = Pin<Box<dyn Future<Output = Result<BTreeMap<String, Option<Decimal>>>> + Send + 'a>>;
@@ -324,21 +562,40 @@ pub(crate) async fn series(k: &Kernel, ctx: &Ctx, doc: &Doc, bucket: Bucket, per
     if !(1..=120).contains(&periods) {
         return Err(Error::field("periods", "is 1 to 120"));
     }
-    let today = Utc::now().date_naive();
-    let from = period_start(bucket, today, periods - 1).ok_or_else(|| Error::field("bucket", "a series goes by day, week, month, quarter or year"))?;
-    let current = period_start(bucket, today, 0).unwrap_or(today).to_string();
+    let (today, fy) = (Utc::now().date_naive(), ctx.fy_start_month);
+    let from = period_start(bucket, today, periods - 1, fy).ok_or_else(|| Error::field("periods", "reach further back than dates go"))?;
+    let current = period_start(bucket, today, 0, fy).unwrap_or(today).to_string();
     let values = series_at(k, ctx, doc, bucket, from, today, 0).await?;
     Ok(values.into_iter().map(|(start, v)| Point { partial: start >= current, start, value: v.map(|d| d.normalize().to_string()) }).collect())
 }
 
-fn series_at<'a>(k: &'a Kernel, ctx: &'a Ctx, doc: &'a Doc, bucket: Bucket, from: chrono::NaiveDate, to: chrono::NaiveDate, depth: usize) -> Series<'a> {
+fn series_at<'a>(k: &'a Kernel, ctx: &'a Ctx, doc: &'a Doc, bucket: Bucket, from: NaiveDate, to: NaiveDate, depth: usize) -> Series<'a> {
     Box::pin(async move {
         let me = s(doc, "metric_name").unwrap_or("this metric").to_string();
+        let series_by = || {
+            s(doc, "series_by")
+                .map(str::trim)
+                .filter(|f| !f.is_empty())
+                .ok_or_else(|| Error::field("series_by", format!("{me}: say which date field a series of it goes by")))
+        };
         match kind_of(doc)? {
-            Kind::Query(mut spec) => {
-                let field = s(doc, "series_by")
-                    .filter(|f| !f.trim().is_empty())
-                    .ok_or_else(|| Error::field("series_by", format!("{me}: say which date field a series of it goes by")))?;
+            // Converted day by day, then each period's total rounded.
+            Kind::Query(spec, Some(c)) => {
+                let field = series_by()?;
+                let converted = convert(k, ctx, &me, &c, groups(k, ctx, &me, &spec, &c, Some((field, from, to))).await?).await?;
+                let mut by_period: BTreeMap<String, Vec<Decimal>> = BTreeMap::new();
+                let mut start = Some(from);
+                while let Some(d) = start.filter(|d| *d <= to) {
+                    by_period.insert(d.to_string(), vec![]);
+                    start = shift(bucket, d, 1);
+                }
+                for (day, v) in converted {
+                    by_period.entry(bucket.start(day, ctx.fy_start_month).to_string()).or_default().push(v);
+                }
+                by_period.into_iter().map(|(start, values)| Ok((start, Some(rounded(total(&me, values)?, c.places))))).collect()
+            }
+            Kind::Query(mut spec, None) => {
+                let field = series_by()?;
                 spec.time_series =
                     Some(TimeSeries { field: field.trim().to_string(), bucket, from: Some(from.to_string()), to: Some(to.to_string()), fill_zero: true });
                 let out = ferrum_studio::run::run(k, ctx, &spec).await?;
@@ -410,7 +667,11 @@ impl DocHook for MetricHook {
         }
         let Ok(kind) = kind_of(doc) else { return Ok(()) };
         let uses = match &kind {
-            Kind::Query(spec) => lineage(spec, |f| reached(hc.ctx, &spec.entity, f)),
+            Kind::Query(spec, None) => lineage(spec, |f| reached(hc.ctx, &spec.entity, f)),
+            Kind::Query(spec, Some(c)) => {
+                let read = lineage(spec, |f| reached(hc.ctx, &spec.entity, f));
+                format!("{read}; converted by {} at the rate on {}", c.currency_field, c.date_field)
+            }
             Kind::Composed { parts, .. } => format!("Composed of: {}", parts.join(", ")),
         };
         doc.insert("uses".into(), json!(uses));
@@ -421,8 +682,11 @@ impl DocHook for MetricHook {
     async fn validate(&self, hc: &mut HookCtx<'_>, doc: &Doc) -> Result<()> {
         match kind_of(doc)? {
             // The query must make sense to the records and to its author's rights.
-            Kind::Query(spec) => {
+            Kind::Query(spec, conversion) => {
                 ferrum_studio::query::compile(hc.ctx, &spec).map_err(|e| Error::field("definition", format!("does not run: {e}")))?;
+                if let Some(c) = conversion {
+                    check_conversion(hc, &spec, &c).await?;
+                }
             }
             Kind::Composed { parts, .. } => check_parts(hc.kernel, hc.ctx, s(doc, "metric_name").unwrap_or_default(), &parts).await?,
         }
@@ -455,7 +719,7 @@ impl DocHook for MetricHook {
                         hc.tx,
                         "MetricSnapshot",
                         obj(json!({"metric": metric.to_string(), "value": ferrum_domain::util::money(v), "read_by": hc.ctx.email, "read_at": Utc::now().to_rfc3339(),
-                                   "certified_hash": s(doc, "certified_hash")})),
+                                   "certified_hash": s(doc, "certified_hash"), "definition": meaning(doc)})),
                     )
                     .await?;
                 Ok(Some(json!({"value": ferrum_domain::util::money(v)})))
@@ -494,5 +758,78 @@ mod tests {
         let series = doc(json!({"definition": {"entity": "Customer", "time_series": {"field": "creation", "bucket": "month"}, "measures": [{"fn": "count"}]}}));
         assert!(spec_of(&series).is_err());
         assert_ne!(fingerprint(&spec), fingerprint(&spec_of(&doc(json!({"definition": {"entity": "Customer", "measures": [{"fn": "count"}]}}))).unwrap()));
+    }
+
+    #[test]
+    fn conversion_is_what_certification_fixes_and_nothing_else_changes() {
+        let doc = |v: Value| v.as_object().cloned().unwrap();
+        let plain = doc(json!({"definition": {"entity": "Sale", "measures": [{"fn": "sum", "field": "amount"}]}, "round_to": 2}));
+        let spec = spec_of(&plain).unwrap();
+        // A metric that does not convert keeps the fingerprint it was certified with before conversion existed.
+        assert_eq!(fingerprint_of(&kind_of(&plain).unwrap()), fingerprint(&spec));
+        let inr = "0195f5a4-0000-7000-8000-000000000001";
+        let mut converted = plain.clone();
+        converted.extend(doc(json!({"convert_to": inr, "currency_field": "currency", "rate_date_field": "posted_on"})));
+        let printed = fingerprint_of(&kind_of(&converted).unwrap());
+        assert_ne!(printed, fingerprint(&spec), "how it converts is part of what it means");
+        let mut finer = converted.clone();
+        finer.insert("round_to".into(), json!(4));
+        assert_ne!(fingerprint_of(&kind_of(&finer).unwrap()), printed, "and so is its rounding");
+        let mut other_day = converted.clone();
+        other_day.insert("rate_date_field".into(), json!("due_on"));
+        assert_ne!(fingerprint_of(&kind_of(&other_day).unwrap()), printed);
+        // Half set, or rounded beyond six places, is refused.
+        let half = |k: &str| {
+            let mut d = plain.clone();
+            d.insert(k.into(), json!("x"));
+            conversion_of(&d).unwrap_err().to_string()
+        };
+        assert!(half("currency_field").contains("say which currency"));
+        assert!(half("rate_date_field").contains("say which currency"));
+        let mut no_day = converted.clone();
+        no_day.remove("rate_date_field");
+        assert!(conversion_of(&no_day).is_err());
+        let mut seven = converted.clone();
+        seven.insert("round_to".into(), json!(7));
+        assert!(conversion_of(&seven).is_err());
+        assert_eq!(conversion_of(&converted).unwrap().map(|c| c.places), Some(2));
+    }
+
+    #[test]
+    fn periods_fiscal_and_calendar() {
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let today = d("2026-11-08");
+        let at = |b: Bucket, back: u32| period_start(b, today, back, 4).unwrap().to_string();
+        assert_eq!((at(Bucket::FiscalYear, 0), at(Bucket::FiscalYear, 1)), ("2026-04-01".into(), "2025-04-01".into()));
+        assert_eq!(
+            (at(Bucket::FiscalQuarter, 0), at(Bucket::FiscalQuarter, 1), at(Bucket::FiscalQuarter, 3)),
+            ("2026-10-01".into(), "2026-07-01".into(), "2026-01-01".into())
+        );
+        assert_eq!(period_start(Bucket::FiscalYear, d("2026-03-31"), 0, 4).unwrap(), d("2025-04-01"), "the last day of a fiscal year is in it");
+        assert_eq!((at(Bucket::Day, 3), at(Bucket::Week, 1), at(Bucket::Month, 2)), ("2026-11-05".into(), "2026-10-26".into(), "2026-09-01".into()));
+        assert_eq!((at(Bucket::Quarter, 1), at(Bucket::Year, 1)), ("2026-07-01".into(), "2025-01-01".into()));
+        assert_eq!(period_start(Bucket::FiscalYear, today, 0, 1).unwrap(), d("2026-01-01"), "a fiscal year from January is the calendar's");
+        assert_eq!(shift(Bucket::FiscalQuarter, d("2026-01-01"), 1), Some(d("2026-04-01")));
+    }
+
+    #[test]
+    fn the_rate_on_a_day_and_rounding_to_even() {
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let n = |s: &str| s.parse::<Decimal>().unwrap();
+        let direct = [(d("2026-03-01"), n("83.10")), (d("2026-04-01"), n("84.25"))];
+        assert_eq!(rate_on(&direct, &[], d("2026-03-31")), Some(n("83.10")));
+        assert_eq!(rate_on(&direct, &[], d("2026-04-01")), Some(n("84.25")), "valid from its own day");
+        assert_eq!(rate_on(&direct, &[], d("2026-02-28")), None, "nothing before the first");
+        // Only the inverse: its reciprocal to 9 places, as documents take it; a direct one wins.
+        let inverse = [(d("2026-01-01"), n("0.0095"))];
+        assert_eq!(rate_on(&[], &inverse, d("2026-03-20")), Some(n("105.263157895")));
+        assert_eq!(rate_on(&direct, &inverse, d("2026-03-20")), Some(n("83.10")));
+        assert_eq!(rate_on(&[], &[(d("2026-01-01"), Decimal::ZERO)], d("2026-03-20")), None);
+        assert_eq!((rounded(n("10868.925"), 2), rounded(n("4220.935"), 2), rounded(n("-1.005"), 2)), (n("10868.92"), n("4220.94"), n("-1.00")));
+        assert_eq!(rounded(n("13371.55657895"), 0), n("13372"));
+        assert!(total("m", [Decimal::MAX, Decimal::ONE]).is_err(), "too large is no value, never a wrong one");
+        // A read cut short is refused, never summed.
+        assert!(whole(json!({"rows": [], "meta": {"truncated": true}}), "m").is_err());
+        assert!(whole(json!({"rows": [], "meta": {"truncated": false}}), "m").is_ok());
     }
 }
