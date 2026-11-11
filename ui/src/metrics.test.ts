@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byDomain, loadUrl, reasonOf, staleSources } from "./Home";
+import { byDomain, valueText, loadUrl, reasonOf, staleSources } from "./Home";
 
 describe("metrics by domain", () => {
   it("groups by domain in name order, other last", () => {
@@ -40,5 +40,14 @@ describe("no value now", () => {
     expect(reasonOf("Lake revenue", new Error("entity: you are not permitted to read Request"))).toBe("entity: you are not permitted to read Request");
     expect(reasonOf("Other", new Error("Lake revenue has no value now: x"))).toBe("Lake revenue has no value now: x");
     expect(reasonOf("Lake revenue", "offline")).toBe("offline");
+  });
+});
+
+describe("a metric's value", () => {
+  it("reads a currency unit as money, other units as a grouped number then the unit", () => {
+    expect(valueText("1808840.88", "INR", "en-IN")).toBe("₹18,08,840.88");
+    expect(valueText("16", "invoices", "en-US")).toBe("16 invoices");
+    expect(valueText("1234567.5", "%", "en-US")).toBe("1,234,567.5 %");
+    expect(valueText("n/a", "", "en-US")).toBe("n/a");
   });
 });
