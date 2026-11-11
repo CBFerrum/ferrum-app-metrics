@@ -6,7 +6,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Gauge } from "lucide-react";
 import { api, docPath, t, isolate } from "@ferrum/client";
-import { ButtonLink, HomeSkeleton, LoadFailed, PageHead, Queue, QueueGrid, QueueItem, StatePanel, useShellTitle, placed } from "@ferrum/kit";
+import { ButtonLink, HomeSkeleton, LoadFailed, PageHead, PageStack, Queue, QueueGrid, QueueItem, StatePanel, useShellTitle, placed } from "@ferrum/kit";
 
 export interface Row {
   id: string;
@@ -73,13 +73,12 @@ export function Home() {
       }
     />
   );
-  if (q.isPending) return <>{head}<HomeSkeleton /></>;
-  if (q.isError) return <>{head}<LoadFailed error={q.error} onRetry={() => void q.refetch()} /></>;
+  if (q.isPending) return <PageStack>{head}<HomeSkeleton /></PageStack>;
+  if (q.isError) return <PageStack>{head}<LoadFailed error={q.error} onRetry={() => void q.refetch()} /></PageStack>;
   const readOf = new Map((q.data ?? []).map((m, i) => [m.id, values[i]]));
   return (
-    <>
+    <PageStack>
       {head}
-      <div className="grid gap-4">
         {q.data.length === 0 && (
           <StatePanel kind="empty" icon={Gauge} title={t("No metric is certified yet")} action={<ButtonLink to="/e/Metric">{t("Metrics in draft")}</ButtonLink>}>
             {t("Metrics in draft wait for a Data Steward to certify them.")}
@@ -109,22 +108,18 @@ export function Home() {
             </Queue>
           ))}
           {sets.data && (
-            <div className="grid gap-2">
+            <div className="flex flex-col gap-2">
               <Queue title={t("Certified datasets")} count={sets.data.length} empty={t("No dataset is certified yet.")}>
                 {sets.data.map((d) => (
                   <QueueItem
                     key={d.id}
                     to={`/e/Dataset/${d.id}`}
                     title={isolate(String(d.dataset_name))}
-                    meta={
-                      <span className="flex flex-wrap items-center gap-x-3 whitespace-normal">
-                        {d.uses ? <span>{isolate(String(d.uses))}</span> : null}
-                        <a className="relative z-10" href={loadUrl(String(d.dataset_name), "csv")} download>
-                          {t("CSV")}
-                        </a>
-                        <a className="relative z-10" href={loadUrl(String(d.dataset_name), "ndjson")} download>
-                          {t("JSON lines")}
-                        </a>
+                    meta={d.uses ? String(d.uses) : undefined}
+                    action={
+                      <span className="flex gap-1">
+                        <ButtonLink href={loadUrl(String(d.dataset_name), "csv")}>{t("CSV")}</ButtonLink>
+                        <ButtonLink href={loadUrl(String(d.dataset_name), "ndjson")}>{t("JSON lines")}</ButtonLink>
                       </span>
                     }
                   />
@@ -134,7 +129,6 @@ export function Home() {
             </div>
           )}
         </QueueGrid>
-      </div>
-    </>
+    </PageStack>
   );
 }
