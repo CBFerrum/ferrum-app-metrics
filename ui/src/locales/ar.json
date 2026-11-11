@@ -2,15 +2,15 @@
   "A warehouse loads these addresses with an API key: it reads what that key's person may read.": "يحمّل مستودع البيانات هذه العناوين بمفتاح API: ويقرأ ما يحق لصاحب ذلك المفتاح قراءته.",
   "Certified datasets": "مجموعات البيانات المعتمدة",
   "Certified metrics": "المقاييس المعتمدة",
-  "Datasets": "مجموعات البيانات",
   "Go to the metrics": "اذهب إلى المقاييس",
   "JSON lines": "أسطر JSON",
   "Metrics": "المقاييس",
   "Metrics in draft": "مقاييس في المسودة",
+  "Metrics in draft wait for a Data Steward to certify them.": "تنتظر المقاييس في المسودة أمين بيانات ليعتمدها.",
   "New dataset": "مجموعة بيانات جديدة",
   "New metric": "مقياس جديد",
   "No dataset is certified yet.": "لم تُعتمد أي مجموعة بيانات بعد.",
-  "No metric is certified yet. {p1} wait for a Data Steward.": "لم يُعتمد أي مقياس بعد. {p1} تنتظر أمين بيانات.",
+  "No metric is certified yet": "لم يُعتمد أي مقياس بعد",
   "No value now: {reason}": "لا قيمة الآن: {reason}",
   "Read from data older than its source allows: {sources}": "مقروءة من بيانات أقدم مما يسمح به مصدرها: {sources}"
 }

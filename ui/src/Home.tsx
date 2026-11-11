@@ -4,9 +4,9 @@
 // metric without a value now says why, rather than seeming to load.
 
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router";
-import { api, docPath, t, isolate } from "@ferrum/client";
-import { ErrorState, PageLoading, useShellTitle, placed } from "@ferrum/kit";
+import { Gauge } from "lucide-react";
+import { api, docPath, formatDecimal, t, isolate } from "@ferrum/client";
+import { ButtonLink, HomeSkeleton, LoadFailed, PageHead, PageStack, Queue, QueueGrid, QueueItem, StatePanel, useShellTitle, placed } from "@ferrum/kit";
 
 export interface Row {
   id: string;
@@ -19,6 +19,22 @@ const rows = (entity: string, filters: unknown[], extra: Record<string, string |
 /** A certified dataset's address for a warehouse (or a download), in `format`. */
 export function loadUrl(name: string, format: "csv" | "ndjson"): string {
   return `/api/app/metrics/dataset?${new URLSearchParams({ name, format }).toString()}`;
+}
+
+/** A value as a person reads it: money in the locale when `unit` is a currency code, else a grouped number then the unit. */
+export function valueText(value: unknown, unit: unknown, locale?: string): string {
+  const v = String(value ?? "").trim();
+  const u = String(unit ?? "").trim();
+  if (!/^-?\d+(\.\d+)?$/.test(v)) return u ? `${v} ${u}` : v;
+  if (/^[A-Z]{3}$/.test(u)) {
+    try {
+      return new Intl.NumberFormat(locale, { style: "currency", currency: u }).format(v as Intl.StringNumericLiteral);
+    } catch {
+      // a code the browser does not know reads as a number then the code
+    }
+  }
+  const n = formatDecimal(v, undefined, locale);
+  return u ? `${n} ${u}` : n;
 }
 
 /** A metric's value as Metrics gives it: the external sources it was read from that are stale among it. */
@@ -60,75 +76,73 @@ export function Home() {
       retry: false,
     })),
   });
-  if (q.isPending) return <PageLoading />;
-  if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
+  const head = (
+    <PageHead
+      title={t("Certified metrics")}
+      actions={
+        <>
+          <ButtonLink to="/e/Dataset/new">{t("New dataset")}</ButtonLink>
+          <ButtonLink to="/e/Metric/new" variant="primary" icon="plus">
+            {t("New metric")}
+          </ButtonLink>
+        </>
+      }
+    />
+  );
+  if (q.isPending) return <PageStack>{head}<HomeSkeleton /></PageStack>;
+  if (q.isError) return <PageStack>{head}<LoadFailed error={q.error} onRetry={() => void q.refetch()} /></PageStack>;
   const readOf = new Map((q.data ?? []).map((m, i) => [m.id, values[i]]));
   return (
-    <div className="np-page">
-      <header className="row" style={{ justifyContent: "space-between" }}>
-        <h2>{t("Certified metrics")}</h2>
-        <Link to="/e/Metric/new">{t("New metric")}</Link>
-      </header>
-      {q.data.length === 0 && (
-        <p className="faint">
-          {placed(t("No metric is certified yet. {p1} wait for a Data Steward."), { p1: <Link to="/e/Metric">{t("Metrics in draft")}</Link> })}
-        </p>
-      )}
-      {byDomain(q.data).map(([domain, list]) => (
-        <section key={domain} className="card card-pad stack" aria-label={domain}>
-          <h3>{isolate(domain)}</h3>
-          <div className="np-columns">
-            {list.map((m) => {
-              const read = readOf.get(m.id);
-              const stale = staleSources(read?.data);
-              return (
-                <Link key={m.id} className="card card-pad stack" to={`/e/Metric/${m.id}`}>
-                  <strong>{isolate(String(m.metric_name))}</strong>
-                  <span style={{ fontSize: 28 }}>
-                    {read?.isError ? "—" : (read?.data?.value ?? "…")} {isolate(String(m.unit ?? ""))}
-                  </span>
-                  {read?.isError && (
-                    <span className="faint" role="status">
-                      {placed(t("No value now: {reason}"), { reason: isolate(reasonOf(String(m.metric_name), read.error)) })}
-                    </span>
-                  )}
-                  {stale.length > 0 && (
-                    <span className="faint" role="status">
-                      {placed(t("Read from data older than its source allows: {sources}"), { sources: isolate(stale.join(", ")) })}
-                    </span>
-                  )}
-                  <span className="faint">{isolate(String(m.uses ?? ""))}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      ))}
-      <section className="card card-pad stack" aria-label={t("Datasets")}>
-        <header className="row" style={{ justifyContent: "space-between" }}>
-          <h3>{t("Certified datasets")}</h3>
-          <Link to="/e/Dataset/new">{t("New dataset")}</Link>
-        </header>
-        {(sets.data ?? []).length === 0 && <p className="faint">{t("No dataset is certified yet.")}</p>}
-        <ul className="stack">
-          {(sets.data ?? []).map((d) => (
-            <li key={d.id} className="stack" style={{ gap: 2 }}>
-              <span>
-                <Link to={`/e/Dataset/${d.id}`}>{isolate(String(d.dataset_name))}</Link> ·{isolate(" ")}
-                <a href={loadUrl(String(d.dataset_name), "csv")} download>
-                  {t("CSV")}
-                </a>{isolate(" ")}
-                ·{isolate(" ")}
-                <a href={loadUrl(String(d.dataset_name), "ndjson")} download>
-                  {t("JSON lines")}
-                </a>
-              </span>
-              <span className="faint">{isolate(String(d.uses ?? ""))}</span>
-            </li>
+    <PageStack>
+      {head}
+        {q.data.length === 0 && (
+          <StatePanel kind="empty" icon={Gauge} title={t("No metric is certified yet")} action={<ButtonLink to="/e/Metric">{t("Metrics in draft")}</ButtonLink>}>
+            {t("Metrics in draft wait for a Data Steward to certify them.")}
+          </StatePanel>
+        )}
+        <QueueGrid>
+          {byDomain(q.data).map(([domain, list]) => (
+            <Queue key={domain} title={isolate(domain)} count={list.length}>
+              {list.map((m) => {
+                const read = readOf.get(m.id);
+                const stale = staleSources(read?.data);
+                const notes = [String(m.uses ?? "") && <span key="u">{isolate(String(m.uses))}</span>, read?.isError && <span key="e" role="status">{placed(t("No value now: {reason}"), { reason: isolate(reasonOf(String(m.metric_name), read.error)) })}</span>, stale.length > 0 && <span key="s" role="status">{placed(t("Read from data older than its source allows: {sources}"), { sources: isolate(stale.join(", ")) })}</span>].filter(Boolean);
+                return (
+                  <QueueItem
+                    key={m.id}
+                    to={`/e/Metric/${m.id}`}
+                    title={isolate(String(m.metric_name))}
+                    meta={notes.length ? <span className="flex flex-col gap-0.5 whitespace-normal">{notes}</span> : undefined}
+                    trailing={
+                      <span className="num text-base font-semibold">{read?.isError ? "—" : read?.data ? isolate(valueText(read.data.value, m.unit)) : "…"}</span>
+                    }
+                  />
+                );
+              })}
+            </Queue>
           ))}
-        </ul>
-        <p className="faint">{t("A warehouse loads these addresses with an API key: it reads what that key's person may read.")}</p>
-      </section>
-    </div>
+          {sets.data && (
+            <div className="flex flex-col gap-2">
+              <Queue title={t("Certified datasets")} count={sets.data.length} empty={t("No dataset is certified yet.")}>
+                {sets.data.map((d) => (
+                  <QueueItem
+                    key={d.id}
+                    to={`/e/Dataset/${d.id}`}
+                    title={isolate(String(d.dataset_name))}
+                    meta={d.uses ? String(d.uses) : undefined}
+                    action={
+                      <span className="flex gap-1">
+                        <ButtonLink href={loadUrl(String(d.dataset_name), "csv")} download size="sm">{t("CSV")}</ButtonLink>
+                        <ButtonLink href={loadUrl(String(d.dataset_name), "ndjson")} download size="sm">{t("JSON lines")}</ButtonLink>
+                      </span>
+                    }
+                  />
+                ))}
+              </Queue>
+              <p className="px-1 text-xs text-muted-foreground">{t("A warehouse loads these addresses with an API key: it reads what that key's person may read.")}</p>
+            </div>
+          )}
+        </QueueGrid>
+    </PageStack>
   );
 }
