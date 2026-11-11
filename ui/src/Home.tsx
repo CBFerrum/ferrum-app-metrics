@@ -5,7 +5,7 @@
 
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Gauge } from "lucide-react";
-import { api, docPath, t, isolate } from "@ferrum/client";
+import { api, docPath, formatDecimal, t, isolate } from "@ferrum/client";
 import { ButtonLink, HomeSkeleton, LoadFailed, PageHead, PageStack, Queue, QueueGrid, QueueItem, StatePanel, useShellTitle, placed } from "@ferrum/kit";
 
 export interface Row {
@@ -19,6 +19,22 @@ const rows = (entity: string, filters: unknown[], extra: Record<string, string |
 /** A certified dataset's address for a warehouse (or a download), in `format`. */
 export function loadUrl(name: string, format: "csv" | "ndjson"): string {
   return `/api/app/metrics/dataset?${new URLSearchParams({ name, format }).toString()}`;
+}
+
+/** A value as a person reads it: money in the locale when `unit` is a currency code, else a grouped number then the unit. */
+export function valueText(value: unknown, unit: unknown, locale?: string): string {
+  const v = String(value ?? "").trim();
+  const u = String(unit ?? "").trim();
+  if (!/^-?\d+(\.\d+)?$/.test(v)) return u ? `${v} ${u}` : v;
+  if (/^[A-Z]{3}$/.test(u)) {
+    try {
+      return new Intl.NumberFormat(locale, { style: "currency", currency: u }).format(v as Intl.StringNumericLiteral);
+    } catch {
+      // a code the browser does not know reads as a number then the code
+    }
+  }
+  const n = formatDecimal(v, undefined, locale);
+  return u ? `${n} ${u}` : n;
 }
 
 /** A metric's value as Metrics gives it: the external sources it was read from that are stale among it. */
@@ -98,9 +114,7 @@ export function Home() {
                     title={isolate(String(m.metric_name))}
                     meta={notes.length ? <span className="flex flex-col gap-0.5 whitespace-normal">{notes}</span> : undefined}
                     trailing={
-                      <span className="text-base font-semibold tabular-nums">
-                        {read?.isError ? "—" : (read?.data?.value ?? "…")} {isolate(String(m.unit ?? ""))}
-                      </span>
+                      <span className="num text-base font-semibold">{read?.isError ? "—" : read?.data ? isolate(valueText(read.data.value, m.unit)) : "…"}</span>
                     }
                   />
                 );
