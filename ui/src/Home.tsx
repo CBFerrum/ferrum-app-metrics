@@ -6,7 +6,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { api, docPath, t, isolate } from "@ferrum/client";
-import { ErrorState, PageLoading, useShellTitle, placed } from "@ferrum/kit";
+import { ErrorState, ListSkeleton, useShellTitle, placed } from "@ferrum/kit";
 
 export interface Row {
   id: string;
@@ -60,7 +60,7 @@ export function Home() {
       retry: false,
     })),
   });
-  if (q.isPending) return <PageLoading />;
+  if (q.isPending) return <ListSkeleton className="np-page" />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   const readOf = new Map((q.data ?? []).map((m, i) => [m.id, values[i]]));
   return (
