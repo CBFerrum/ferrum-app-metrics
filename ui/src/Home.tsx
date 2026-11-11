@@ -118,8 +118,8 @@ export function Home() {
                     meta={d.uses ? String(d.uses) : undefined}
                     action={
                       <span className="flex gap-1">
-                        <ButtonLink href={loadUrl(String(d.dataset_name), "csv")}>{t("CSV")}</ButtonLink>
-                        <ButtonLink href={loadUrl(String(d.dataset_name), "ndjson")}>{t("JSON lines")}</ButtonLink>
+                        <ButtonLink href={loadUrl(String(d.dataset_name), "csv")} download size="sm">{t("CSV")}</ButtonLink>
+                        <ButtonLink href={loadUrl(String(d.dataset_name), "ndjson")} download size="sm">{t("JSON lines")}</ButtonLink>
                       </span>
                     }
                   />
