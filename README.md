@@ -141,6 +141,7 @@ cd ui && npm run build && npm run check
 
 | Version | Highlights |
 |---|---|
+| **0.7.4** | Rebuilt on the tuned design system: better menu icons, a lighter first page, a visible scroll cue, cleaner print. |
 | **0.7.3** | The redesigned interface: the upgraded design system, shaped loading, told-apart states. |
 | **0.7.2** | A dataset's parse errors no longer reach readers with their raw rows; readers are not told where the engine or the files are. |
 | **0.7.1** | The KPI page says when a value is stale, and why a metric has no value now; the engine bounds how deep and wide a query is before planning it. |
