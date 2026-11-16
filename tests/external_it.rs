@@ -14,7 +14,7 @@
 
 use ferrum_kernel::secret::SecretKey;
 use ferrum_kernel::tenant::NewTenant;
-use ferrum_kernel::vault::{New, Scope, Zeroizing};
+use ferrum_kernel::vault::{New, Rule, Scope, Zeroizing};
 use ferrum_kernel::{Ctx, Db, DbConfig, Doc, Error, HookRegistry, Kernel, KernelSettings};
 use ferrum_meta::Catalog;
 use ferrum_metrics_engine::{Config, Dataset, Engine, Format, Limits};
@@ -22,8 +22,6 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
-
-const TOKEN: &str = "external-it-0123456789abcdef0123456789";
 
 fn obj(v: Value) -> Doc {
     v.as_object().cloned().unwrap()
@@ -61,10 +59,9 @@ fn refused<V: std::fmt::Debug>(r: Result<V, Error>, says: &str) {
     assert!(r.is_err() && msg.contains(says), "expected a refusal saying {says:?}, got {msg}");
 }
 
-/// What the server resolved from its settings and the environment, as `ferrum_kernel::env` hands it to Metrics: the
-/// engine's address and the environment's token.
-fn resolve(url: Option<String>, token: Option<&str>) {
-    ferrum_kernel::env::set([("FERRUM_METRICS_ENGINE_URL".to_string(), url), ("FERRUM_METRICS_ENGINE_TOKEN".to_string(), token.map(str::to_string))].into());
+/// What the server resolved from its settings, as `ferrum_kernel::env` hands it to Metrics: the engine's address.
+fn resolve(url: Option<String>) {
+    ferrum_kernel::env::set([("FERRUM_METRICS_ENGINE_URL".to_string(), url)].into());
 }
 
 fn lake() -> PathBuf {
@@ -83,25 +80,21 @@ fn external_metrics_through_the_engine() {
     let dir = lake();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    assert!(std::env::var("FERRUM_METRICS_ENGINE_URL").is_err() && std::env::var("FERRUM_METRICS_ENGINE_TOKEN").is_err(), "nothing in the environment");
+    assert!(std::env::var("FERRUM_METRICS_ENGINE_URL").is_err(), "nothing in the environment");
     // The engine's address as the server resolves it from its settings table (`metrics.engine_url`), nothing in the
     // environment; no token anywhere yet.
-    resolve(Some(format!("http://127.0.0.1:{port}")), None);
+    resolve(Some(format!("http://127.0.0.1:{port}")));
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().thread_stack_size(16 << 20).build().unwrap();
     rt.block_on(async { tokio::spawn(scenario(dir, listener)).await.unwrap() });
 }
 
 async fn scenario(dir: PathBuf, listener: std::net::TcpListener) {
-    // ───────────── the engine, beside the kernel ─────────────
+    // ───────────── the engine, beside the kernel (started once its token file is rendered) ─────────────
     let port = listener.local_addr().unwrap().port();
     listener.set_nonblocking(true).unwrap();
     let listener = tokio::net::TcpListener::from_std(listener).unwrap();
     let csv = |name: &str| Dataset { name: name.into(), workspace: "lake".into(), format: Format::Csv, path: dir.join("orders.csv") };
     let engine = Arc::new(Engine::new(Config { datasets: vec![csv("orders_lake")], limits: Limits::default() }).unwrap());
-    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(ferrum_metrics_engine::serve(listener, engine, vec![TOKEN.into()], async {
-        let _ = stopped.await;
-    }));
 
     let url = std::env::var("FERRUM_METRICS_TEST_DATABASE_URL").unwrap_or_else(|_| "postgres://ferrum:ferrum@localhost:5432/ferrum_metrics_test".into());
     let db = Db::connect(DbConfig { url: url.clone(), max_connections: 16, ..Default::default() }).await.expect("connect");
@@ -198,28 +191,24 @@ async fn scenario(dir: PathBuf, listener: std::net::TcpListener) {
         let (k, steward) = (k.clone(), steward.clone());
         async move { k.run_action(&steward, "Metric", id, "certify", Value::Null).await.expect("certified") }
     };
-    // ───────────── the engine's token: not set up, then the environment's, adopted once ─────────────
-    refused(make(&author, "Too soon", json!({"external": external("select sum(total) from orders")})).await, "its token is in neither");
-    resolve(Some(format!("http://127.0.0.1:{port}")), Some(TOKEN));
-    // Replicas starting together (their upkeep at once) keep the environment's token in the vault once.
-    let upkeep: Vec<_> = (0..4)
-        .map(|_| {
-            tokio::spawn({
-                let k = k.clone();
-                async move { ferrum_app_metrics::maintenance(&k).await }
-            })
-        })
-        .collect();
-    for u in upkeep {
-        u.await.unwrap().expect("upkeep");
-    }
-    let kept = vault.describe(&k, Scope::Installation, "engine.token").await.unwrap().expect("adopted");
+    // ───────────── the engine's token: not set up, then made by the service's first render, which the engine reads ─────────────
+    refused(make(&author, "Too soon", json!({"external": external("select sum(total) from orders")})).await, "holds no engine.token");
+    let address = format!("http://127.0.0.1:{port}");
+    let rendered = k.render("metrics-engine", &|name: &str| (name == "metrics.engine_url").then(|| address.clone())).await.expect("the token file");
+    let files = dir.join("companion");
+    ferrum_kernel::companion::write(&files, &rendered).expect("written for the engine");
+    let tokens = ferrum_metrics_engine::tokens(&files.join("token")).expect("the engine's tokens");
+    let token = tokens[0].clone();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(ferrum_metrics_engine::serve(listener, engine, tokens, async {
+        let _ = stopped.await;
+    }));
+    let kept = vault.describe(&k, Scope::Installation, "engine.token").await.unwrap().expect("made");
     assert_eq!(
-        (kept.version, kept.rule.reveal, kept.rule.hosts.clone()),
-        (1, false, vec!["127.0.0.1".to_string()]),
-        "once, never revealed, bound to the engine's host"
+        (kept.version, kept.managed_by.as_deref(), kept.rule.hosts.clone()),
+        (1, Some("metrics"), vec!["127.0.0.1".to_string()]),
+        "made once, the service's, bound to the engine's host"
     );
-    assert!(vault.reveal(&k, Scope::Installation, "engine.token").await.is_err(), "its value never leaves the vault");
     let revenue =
         make(&author, "Lake revenue", json!({"external": external("select sum(total) from orders"), "unit": "USD"})).await.expect("an external metric");
     assert_eq!(revenue["uses"], "External: orders_lake through Wren (models orders)");
@@ -294,21 +283,18 @@ async fn scenario(dir: PathBuf, listener: std::net::TcpListener) {
     certify(uid(&revenue["id"])).await;
     assert_eq!(value(&k, &north, "Lake revenue").await.unwrap().0, "100", "the North's paid orders: one of 100");
 
-    // ───────────── the vault's token, and the environment's winning over it ─────────────
-    resolve(Some(format!("http://127.0.0.1:{port}")), None);
-    assert_eq!(value(&k, &north, "Lake revenue").await.unwrap().0, "100", "the vault's token, with nothing in the environment");
+    // ───────────── the vault's token, and only the vault's ─────────────
+    // Another than the engine was started with, nothing before it still taken: refused, saying so.
+    let bound = Rule { hosts: vec!["127.0.0.1".to_string()], ..Default::default() };
     let other = Zeroizing::new(b"another-token-0123456789abcdef0123456789".to_vec());
-    vault.rotate(&k, Scope::Installation, "engine.token", New::Value(other)).await.expect("the operator gives another");
+    vault.set(&k, Scope::Installation, "engine.token", New::Value(other), bound.clone()).await.expect("another");
     refused(value(&k, &north, "Lake revenue").await, "refused its token");
-    resolve(Some(format!("http://127.0.0.1:{port}")), Some(TOKEN));
-    assert_eq!(value(&k, &north, "Lake revenue").await.unwrap().0, "100", "the environment's token wins while it is set");
-    ferrum_app_metrics::maintenance(&k).await.unwrap();
-    assert_eq!(vault.describe(&k, Scope::Installation, "engine.token").await.unwrap().unwrap().version, 2, "adopted once: never again over the vault's");
-    vault.rotate(&k, Scope::Installation, "engine.token", New::Value(Zeroizing::new(TOKEN.as_bytes().to_vec()))).await.unwrap();
+    vault.set(&k, Scope::Installation, "engine.token", New::Value(Zeroizing::new(token.as_bytes().to_vec())), bound).await.unwrap();
+    assert_eq!(value(&k, &north, "Lake revenue").await.unwrap().0, "100", "the one the engine takes");
     // The address moved to another host (a changed row): the token does not follow it.
-    resolve(Some(format!("http://localhost:{port}")), None);
+    resolve(Some(format!("http://localhost:{port}")));
     refused(value(&k, &north, "Lake revenue").await, "may not be sent to localhost");
-    resolve(Some(format!("http://127.0.0.1:{port}")), None);
+    resolve(Some(format!("http://127.0.0.1:{port}")));
     assert_eq!(value(&k, &north, "Lake revenue").await.unwrap().0, "100", "a live change of address, seen at the next use");
     // Nothing plain in any table: every row of every table, the vault's included, as text.
     let mut tx = k.db.pool.begin().await.unwrap();
@@ -321,7 +307,7 @@ async fn scenario(dir: PathBuf, listener: std::net::TcpListener) {
     assert!(tables.iter().any(|(s, _)| s == "vault"), "the vault's tables are among them");
     for (schema, table) in tables {
         let sql = format!("select count(*) from \"{schema}\".\"{table}\" t where t::text like '%' || $1 || '%'");
-        let found: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(sql)).bind(TOKEN).fetch_one(&mut *tx).await.unwrap();
+        let found: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(sql)).bind(&token).fetch_one(&mut *tx).await.unwrap();
         assert_eq!(found, 0, "the engine's token is plain in {schema}.{table}");
     }
     tx.rollback().await.unwrap();

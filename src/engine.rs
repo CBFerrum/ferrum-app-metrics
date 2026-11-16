@@ -15,7 +15,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ferrum_domain::util::{s, sys};
-use ferrum_kernel::vault::{Carry, Scope, Zeroizing};
+use ferrum_kernel::vault::{Carry, Scope};
 use ferrum_kernel::{Ctx, Doc, DocHook, Error, Filter, HookCtx, Kernel, Result};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
@@ -219,15 +219,12 @@ pub(crate) async fn ask(k: &Kernel, path: &str, body: &Value) -> Result<Value> {
     let address = format!("{}/{path}", base.trim_end_matches('/'));
     // The engine is the operator's, on a private network: its address may be private, and plain http.
     let (client, url) = k.vetted_client(&address, true, Duration::from_secs(ENGINE_SECS), "ferrum-metrics").await?;
-    let (header, token) = match crate::keys::environment(k).await {
-        Some(token) => ("authorization".to_string(), Zeroizing::new(format!("Bearer {}", token.as_str()))),
-        None => {
-            let host = url.host_str().unwrap_or_default().to_string();
-            let version = crate::keys::sending(k).await.map_err(|e| crate::keys::refused(e, &host))?;
-            let carried = crate::keys::vault()?.carry_at(k, Scope::Installation, crate::keys::TOKEN, &url, &Carry::Bearer, version).await;
-            carried.map(|(_, header)| header).map_err(|e| crate::keys::refused(e, &host))?
-        }
-    };
+    let host = url.host_str().unwrap_or_default().to_string();
+    let version = crate::keys::sending(k).await.map_err(|e| crate::keys::refused(e, &host))?;
+    let (_, (header, token)) = crate::keys::vault()?
+        .carry_at(k, Scope::Installation, crate::keys::TOKEN, &url, &Carry::Bearer, version)
+        .await
+        .map_err(|e| crate::keys::refused(e, &host))?;
     // Why is the operator's to know, in the server's log: its address is not the reader's.
     let r = client.post(url).header(header, token.as_str()).json(body).send().await.map_err(|e| {
         tracing::warn!(error = %e, "Metrics' engine cannot be reached");
@@ -241,9 +238,7 @@ pub(crate) async fn ask(k: &Kernel, path: &str, body: &Value) -> Result<Value> {
     let said = answer["error"].as_str().unwrap_or("it gave no reason").to_string();
     match status {
         200..=299 => Ok(answer),
-        401 => Err(Error::internal(
-            "Metrics' engine refused its token: the one Metrics holds (FERRUM_METRICS_ENGINE_TOKEN, else engine.token in its vault) differs from the engine's",
-        )),
+        401 => Err(Error::internal("Metrics' engine refused its token: the one in Metrics' vault (engine.token) differs from the engine's")),
         400 | 404 | 413 | 422 => Err(Error::invalid(said)),
         403 => Err(Error::Forbidden(said)),
         _ => Err(Error::Unavailable(format!("Metrics' engine: {said}"))),

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0
+
+No database or interface change. Needs the platform's companion calls, as 0.9.0.
+
+**The vault is the engine token's one home.** Metrics no longer reads `FERRUM_METRICS_ENGINE_TOKEN`: the token is the
+installation's secret `engine.token` in Metrics' own vault, made by the first render of the service `metrics-engine`, or
+kept where an operator set it (`PUT /api/operator/secrets/metrics/engine.token`) before one, and put on each request by
+the vault for the hosts its rule names. The environment's token no longer wins, and the upkeep no longer copies it into
+the vault. `metrics.engine_url` no longer names that variable as the secret it is given (`sends:`), so its stored value
+applies whatever the environment holds. With no token in the vault, an external metric is refused with "Metrics' engine
+for external sources is not set up on this server: Metrics' vault holds no engine.token (the service metrics-engine
+makes it at its first render)".
+
+**The engine reads only `FERRUM_METRICS_ENGINE_TOKEN_FILE`**, the file the service renders, and does not start without
+it. CI runs its image on such a file.
+
 ## 0.9.0
 
 Needs the platform's companion calls (Ferrum `9a9bd8f0` or later; its app API still says 0.3.9). No database or

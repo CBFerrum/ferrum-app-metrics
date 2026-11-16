@@ -101,9 +101,12 @@ jobs:
            "limits": {"rows": 100, "millis": 10000, "memory_mb": 256, "concurrent": 2, "wait_millis": 2000}}
           JSON
           token=$(openssl rand -hex 24)
+          # Its token as the service metrics-engine renders it: a file, a token a line (the engine's user reads it).
+          printf '%s\n' "$token" > smoke/token && chmod 644 smoke/token
           docker run -d --name engine -p 127.0.0.1:5180:5180 --read-only --cap-drop ALL --security-opt no-new-privileges \
-            -e FERRUM_METRICS_ENGINE_CONFIG=/etc/ferrum/engine.json -e FERRUM_METRICS_ENGINE_TOKEN="$token" \
-            -v "$PWD/smoke/engine.json:/etc/ferrum/engine.json:ro" -v "$PWD/smoke/data:/data:ro" ferrum-metrics-engine:ci
+            -e FERRUM_METRICS_ENGINE_CONFIG=/etc/ferrum/engine.json -e FERRUM_METRICS_ENGINE_TOKEN_FILE=/run/companion/token \
+            -v "$PWD/smoke/engine.json:/etc/ferrum/engine.json:ro" -v "$PWD/smoke/data:/data:ro" -v "$PWD/smoke/token:/run/companion/token:ro" \
+            ferrum-metrics-engine:ci
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:5180/health && break; sleep 1; done
           model='{"catalog": "wren", "schema": "public", "models": [{"name": "orders", "tableReference": {"table": "orders_lake"}, "columns": [{"name": "id", "type": "integer"}, {"name": "region", "type": "varchar"}, {"name": "total", "type": "double"}]}]}'
           ask() { curl -s -o out.json -w '%{http_code}' -H 'content-type: application/json' "$@" http://127.0.0.1:5180/query; }

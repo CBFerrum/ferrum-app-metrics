@@ -1,6 +1,6 @@
 id: metrics
 name: Metrics
-version: 0.9.0
+version: 0.10.0
 publisher: cbferrum
 summary: "Metrics and datasets defined once on Studio, certified by a steward, kept under change control with their lineage, read with each person's own rights, loaded into a warehouse, and a glossary"
 description: README.md
@@ -17,7 +17,6 @@ operator_settings:
   - key: engine_url
     env: FERRUM_METRICS_ENGINE_URL
     applies: live
-    sends: FERRUM_METRICS_ENGINE_TOKEN
     doc: >-
       Metrics' engine for external sources, as the server reaches it (a private address; plain http allowed). Its token
       is Metrics' secret engine.token, sent only to the host it was given for.
