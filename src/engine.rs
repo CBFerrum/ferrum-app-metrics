@@ -9,12 +9,13 @@
 //! engine is read as a database is, within a time limit, so a retried save or delivery reads again and does
 //! nothing twice.
 //!
-//! The engine's address and token are the operator's: `FERRUM_METRICS_ENGINE_URL` (a private address, plain
-//! http allowed) and `FERRUM_METRICS_ENGINE_TOKEN`.
+//! The engine's address and token are the operator's: the setting `metrics.engine_url` (`FERRUM_METRICS_ENGINE_URL`; a
+//! private address, plain http allowed) and the secret `engine.token` in Metrics' vault (`keys.rs`).
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ferrum_domain::util::{s, sys};
+use ferrum_kernel::vault::{Carry, Scope, Zeroizing};
 use ferrum_kernel::{Ctx, Doc, DocHook, Error, Filter, HookCtx, Kernel, Result};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
@@ -206,18 +207,28 @@ async fn workspace(k: &Kernel, ctx: &Ctx) -> String {
     slug.await.unwrap_or_else(|_| ctx.tenant.to_string())
 }
 
+/// The engine's address, as the server's settings say it (`metrics.engine_url`), at each use: a change applies at once.
+pub(crate) fn address() -> Option<String> {
+    ferrum_kernel::env::var("FERRUM_METRICS_ENGINE_URL").map(|u| u.trim().to_string()).filter(|u| !u.is_empty())
+}
+
 /// The engine's answer to `path` with `body`, or why there is none.
 async fn ask(k: &Kernel, path: &str, body: &Value) -> Result<Value> {
-    let base = std::env::var("FERRUM_METRICS_ENGINE_URL")
-        .ok()
-        .filter(|u| !u.trim().is_empty())
-        .ok_or_else(|| Error::Unavailable("Metrics' engine for external sources is not set up on this server (FERRUM_METRICS_ENGINE_URL)".into()))?;
-    let token = std::env::var("FERRUM_METRICS_ENGINE_TOKEN").unwrap_or_default();
+    let base =
+        address().ok_or_else(|| Error::Unavailable("Metrics' engine for external sources is not set up on this server (FERRUM_METRICS_ENGINE_URL)".into()))?;
     let address = format!("{}/{path}", base.trim_end_matches('/'));
     // The engine is the operator's, on a private network: its address may be private, and plain http.
     let (client, url) = k.vetted_client(&address, true, Duration::from_secs(ENGINE_SECS), "ferrum-metrics").await?;
+    let (header, token) = match crate::keys::environment(k).await {
+        Some(token) => ("authorization".to_string(), Zeroizing::new(format!("Bearer {}", token.as_str()))),
+        None => {
+            let host = url.host_str().unwrap_or_default().to_string();
+            let carried = crate::keys::vault()?.carry(k, Scope::Installation, crate::keys::TOKEN, &url, &Carry::Bearer).await;
+            carried.map_err(|e| crate::keys::refused(e, &host))?
+        }
+    };
     // Why is the operator's to know, in the server's log: its address is not the reader's.
-    let r = client.post(url).bearer_auth(token).json(body).send().await.map_err(|e| {
+    let r = client.post(url).header(header, token.as_str()).json(body).send().await.map_err(|e| {
         tracing::warn!(error = %e, "Metrics' engine cannot be reached");
         Error::Unavailable("Metrics' engine cannot be reached".into())
     })?;
@@ -229,7 +240,9 @@ async fn ask(k: &Kernel, path: &str, body: &Value) -> Result<Value> {
     let said = answer["error"].as_str().unwrap_or("it gave no reason").to_string();
     match status {
         200..=299 => Ok(answer),
-        401 => Err(Error::internal("Metrics' engine refused its token: FERRUM_METRICS_ENGINE_TOKEN differs from the engine's")),
+        401 => Err(Error::internal(
+            "Metrics' engine refused its token: the one Metrics holds (FERRUM_METRICS_ENGINE_TOKEN, else engine.token in its vault) differs from the engine's",
+        )),
         400 | 404 | 413 | 422 => Err(Error::invalid(said)),
         403 => Err(Error::Forbidden(said)),
         _ => Err(Error::Unavailable(format!("Metrics' engine: {said}"))),
