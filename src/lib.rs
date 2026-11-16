@@ -56,6 +56,15 @@ pub fn register(hooks: &mut HookRegistry) {
         .register("MetricSubscription", Arc::new(delivery::SubscriptionHook))
         .register("ExternalSource", Arc::new(engine::SourceHook));
     hooks.add_site("metrics", Arc::new(site::MetricsSite));
+    // The engine's token file, rendered as each engine starts (`ferrum task render service:metrics-engine`).
+    hooks.add_companion("metrics-engine", Arc::new(keys::Service));
+}
+
+/// Asks the engine as Metrics does (`check` or `query`, with the token from the environment, else carried by the vault):
+/// its answer. For tests.
+#[doc(hidden)]
+pub async fn ask_engine(k: &Kernel, path: &str, body: &Value) -> Result<Value> {
+    engine::ask(k, path, body).await
 }
 
 /// This app's reports: none of its own yet.

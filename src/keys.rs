@@ -1,10 +1,14 @@
 //! The engine's token, in Metrics' own vault (Ferrum docs/app-contract.md, *The vault*): the installation's secret
-//! `engine.token`, never revealed, put on each request to the engine by the vault (`carry`), and only for the hosts its
-//! rule names. The environment's `FERRUM_METRICS_ENGINE_TOKEN`, while it is set, still wins (through this release), and
-//! is adopted into the vault once, bound to the host of the engine's address then: under an advisory lock, so that
-//! replicas starting together adopt it once. Moving the engine's address to another host does not move the token with
-//! it: the operator changes the secret's rule (`PUT /api/operator/secrets/metrics/engine.token/rule`).
+//! `engine.token`, put on each request to the engine by the vault (`carry_at`), and only for the hosts its rule names.
+//! The environment's `FERRUM_METRICS_ENGINE_TOKEN`, while it is set, still wins (through this release), and is adopted
+//! into the vault once, bound to the host of the engine's address then: only where the vault holds none, under the
+//! secret's own lock, so that replicas starting together, or a render making it at that moment, write it once.
+//!
+//! The service `metrics-engine` ([`Service`]) writes the token into the file the engine reads as it starts
+//! (`FERRUM_METRICS_ENGINE_TOKEN_FILE`): made by the vault at the first render where it holds none, bound to the host of
+//! `metrics.engine_url`, or the one there kept, from then on the service's, rotated by the operator through it.
 
+use ferrum_kernel::companion::{Companion, File, Rendering};
 use ferrum_kernel::vault::{New, Rule, Scope, Vault, Zeroizing};
 use ferrum_kernel::{Error, Kernel, Result};
 use std::sync::RwLock;
@@ -67,28 +71,65 @@ pub(crate) fn refused(e: Error, host: &str) -> Error {
 }
 
 /// Takes the environment's token into the vault when the vault has none yet, bound to the host of the engine's address
-/// now: once, under an advisory lock held while it looks and sets, so that replicas doing it together set it once. A
-/// token already there stays (the environment's, while set, is the one used). Whether it set it now.
+/// now: once, only where there is none, under the secret's own lock. A token already there stays (the environment's,
+/// while set, is the one used). Whether it set it now.
 pub(crate) async fn adopt(k: &Kernel) -> Result<bool> {
     if ADOPTED.load(Ordering::Relaxed) {
         return Ok(false);
     }
     let (Some(token), Some(url)) = (from_environment(), crate::engine::address()) else { return Ok(false) };
     let Some(host) = host(&url) else { return Ok(false) };
-    let v = handle()?;
-    let mut lock = k.db.system_tx().await?;
-    sqlx::query("select pg_advisory_xact_lock(hashtext('metrics: adopt engine.token'))").execute(&mut *lock).await?;
-    let adopted = match v.describe(k, Scope::Installation, TOKEN).await? {
-        Some(_) => false,
-        None => {
-            let rule = Rule { hosts: vec![host], ..Default::default() };
-            v.set(k, Scope::Installation, TOKEN, New::Value(Zeroizing::new(token.as_bytes().to_vec())), rule).await?;
-            true
-        }
-    };
-    lock.commit().await?;
+    let rule = Rule { hosts: vec![host], ..Default::default() };
+    let adopted = handle()?.adopt(k, Scope::Installation, TOKEN, New::Value(Zeroizing::new(token.as_bytes().to_vec())), rule, "environment").await?;
     ADOPTED.store(true, Ordering::Relaxed);
     Ok(adopted)
+}
+
+/// The version of the token to send: the one before while a rotation of the service's token overlaps, which an engine not
+/// restarted since takes too; none (the current one) otherwise.
+pub(crate) async fn sending(k: &Kernel) -> Result<Option<i32>> {
+    let d = handle()?.describe(k, Scope::Installation, TOKEN).await?;
+    Ok(d.filter(|d| d.managed_by.is_some() && d.previous_until.is_some_and(|t| t > chrono::Utc::now())).map(|d| d.version - 1))
+}
+
+/// How long the token before a rotation is still sent and still taken: a day, to restart the engine's pods in.
+const OVERLAP_SECS: i64 = 86_400;
+
+/// The engine's token file, written as each engine starts (`ferrum task render service:metrics-engine to:<dir>`): `token`,
+/// each version the vault keeps on a line of its own, the current first. Made by the vault at the first render where it
+/// holds none, bound to the host of `metrics.engine_url`; where it holds one that is no service's yet (Metrics 0.8 copied
+/// it from `FERRUM_METRICS_ENGINE_TOKEN`, or a person set it: the token the engine already takes), kept as it is, with the
+/// hosts it had. One a render made or kept before is left as it is.
+pub(crate) struct Service;
+
+#[async_trait::async_trait]
+impl Companion for Service {
+    fn files(&self) -> &'static [&'static str] {
+        &["token"]
+    }
+
+    fn made(&self) -> &'static [&'static str] {
+        &[TOKEN]
+    }
+
+    async fn render(&self, r: &Rendering<'_>) -> Result<Vec<File>> {
+        let rule = Rule { reveal: true, overlap_secs: OVERLAP_SECS, ..Default::default() };
+        match r.vault().describe(r.kernel(), Scope::Installation, TOKEN).await? {
+            None => {
+                let url = r.needs("metrics.engine_url")?;
+                let host = host(&url).ok_or_else(|| Error::invalid("metrics.engine_url is the engine's address, such as http://metrics-engine:5180"))?;
+                r.made(TOKEN, Rule { hosts: vec![host], ..rule }).await?
+            }
+            Some(d) if d.managed_by.is_none() => r.keep(TOKEN, Rule { hosts: d.rule.hosts, ..rule }).await?,
+            Some(_) => {}
+        }
+        let mut bytes = Zeroizing::new(Vec::with_capacity(256));
+        for v in r.versions(TOKEN).await? {
+            bytes.extend_from_slice(&v.value);
+            bytes.push(b'\n');
+        }
+        Ok(vec![File { name: "token".into(), bytes, secret: true }])
+    }
 }
 
 /// The host of an address (`http://engine:5180/x` → `engine`), in lower case.

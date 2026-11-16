@@ -213,7 +213,7 @@ pub(crate) fn address() -> Option<String> {
 }
 
 /// The engine's answer to `path` with `body`, or why there is none.
-async fn ask(k: &Kernel, path: &str, body: &Value) -> Result<Value> {
+pub(crate) async fn ask(k: &Kernel, path: &str, body: &Value) -> Result<Value> {
     let base =
         address().ok_or_else(|| Error::Unavailable("Metrics' engine for external sources is not set up on this server (FERRUM_METRICS_ENGINE_URL)".into()))?;
     let address = format!("{}/{path}", base.trim_end_matches('/'));
@@ -223,8 +223,9 @@ async fn ask(k: &Kernel, path: &str, body: &Value) -> Result<Value> {
         Some(token) => ("authorization".to_string(), Zeroizing::new(format!("Bearer {}", token.as_str()))),
         None => {
             let host = url.host_str().unwrap_or_default().to_string();
-            let carried = crate::keys::vault()?.carry(k, Scope::Installation, crate::keys::TOKEN, &url, &Carry::Bearer).await;
-            carried.map_err(|e| crate::keys::refused(e, &host))?
+            let version = crate::keys::sending(k).await.map_err(|e| crate::keys::refused(e, &host))?;
+            let carried = crate::keys::vault()?.carry_at(k, Scope::Installation, crate::keys::TOKEN, &url, &Carry::Bearer, version).await;
+            carried.map(|(_, header)| header).map_err(|e| crate::keys::refused(e, &host))?
         }
     };
     // Why is the operator's to know, in the server's log: its address is not the reader's.

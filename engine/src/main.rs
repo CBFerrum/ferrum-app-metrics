@@ -1,7 +1,9 @@
 //! `ferrum-metrics-engine`: Metrics' engine for external sources, as a service.
 //!
 //! * `FERRUM_METRICS_ENGINE_CONFIG`: the operator's JSON file of datasets and limits (see the crate's docs).
-//! * `FERRUM_METRICS_ENGINE_TOKEN`: the bearer token Metrics sends, at least 32 characters.
+//! * `FERRUM_METRICS_ENGINE_TOKEN_FILE`: a file of the tokens Metrics may send, one a line (what the service
+//!   metrics-engine renders: the current one, and the one before while a rotation's overlap lasts);
+//!   `FERRUM_METRICS_ENGINE_TOKEN` otherwise, the one token. Each at least 32 characters.
 //! * `FERRUM_METRICS_ENGINE_ADDR`: where it listens; `127.0.0.1:5180` unless set.
 //!
 //! It stops taking work on SIGTERM or Ctrl-C and finishes what it holds.
@@ -27,10 +29,8 @@ async fn run() -> Result<(), String> {
     let path = std::env::var("FERRUM_METRICS_ENGINE_CONFIG").map_err(|_| "FERRUM_METRICS_ENGINE_CONFIG names no configuration file".to_string())?;
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{path} cannot be read: {e}"))?;
     let config: Config = serde_json::from_str(&text).map_err(|e| format!("{path} is not a configuration: {e}"))?;
-    let token = std::env::var("FERRUM_METRICS_ENGINE_TOKEN").map_err(|_| "FERRUM_METRICS_ENGINE_TOKEN is not set".to_string())?;
-    if token.len() < 32 {
-        return Err("FERRUM_METRICS_ENGINE_TOKEN is at least 32 characters".into());
-    }
+    let file = std::env::var_os("FERRUM_METRICS_ENGINE_TOKEN_FILE").map(std::path::PathBuf::from);
+    let tokens = ferrum_metrics_engine::tokens(file.as_deref(), std::env::var("FERRUM_METRICS_ENGINE_TOKEN").ok())?;
     let addr = std::env::var("FERRUM_METRICS_ENGINE_ADDR").unwrap_or_else(|_| "127.0.0.1:5180".into());
     for d in &config.datasets {
         if !d.path.exists() {
@@ -40,7 +40,7 @@ async fn run() -> Result<(), String> {
     let engine = Arc::new(Engine::new(config)?);
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| format!("cannot listen on {addr}: {e}"))?;
     eprintln!("ferrum-metrics-engine: listening on {addr} with {} datasets", engine.datasets());
-    serve(listener, engine, token, stopped()).await.map_err(|e| e.to_string())
+    serve(listener, engine, tokens, stopped()).await.map_err(|e| e.to_string())
 }
 
 /// SIGTERM or Ctrl-C.

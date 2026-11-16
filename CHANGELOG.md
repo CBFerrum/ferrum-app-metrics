@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.0
+
+Needs the platform's companion calls (Ferrum `9a9bd8f0` or later; its app API still says 0.3.9). No database or
+interface change.
+
+**The engine takes its token from the vault as it starts.** Metrics declares the service `metrics-engine` (Ferrum
+docs/app-contract.md, *Declaring a service*): `ferrum task render service:metrics-engine to:<dir>` writes `token`, each
+version the vault keeps on a line of its own, the current first. The first render makes `engine.token` where the vault
+holds none (once, however many render at once), bound to the host of `metrics.engine_url`; where Metrics 0.8 copied it
+from the environment it is kept as it is. `ferrum task vault_rotate level:service service:metrics-engine` rotates it:
+Metrics sends the token before while the overlap of a day lasts, so restart the engine's pods within it.
+
+**The engine reads `FERRUM_METRICS_ENGINE_TOKEN_FILE`** where set, taking any of its lines (each compared whole, in time
+that does not depend on where it differs), and `FERRUM_METRICS_ENGINE_TOKEN` otherwise.
+
+**The environment's token is copied into the vault only where it holds none**, under the secret's own lock
+(`Vault::adopt`), so a render making it at the same moment is never overwritten.
+
 ## 0.8.0
 
 Needs platform 0.3.9 (Ferrum `22d082f7` or later), which reads apps' operator settings. No database or interface change.
