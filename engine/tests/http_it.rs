@@ -38,7 +38,7 @@ async fn the_engine_over_http() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(serve(listener, engine, TOKEN.into(), async {
+    let server = tokio::spawn(serve(listener, engine, vec![TOKEN.into()], async {
         let _ = stopped.await;
     }));
     let manifest = json!({"catalog": "wren", "schema": "public", "models": [{"name": "orders", "tableReference": {"table": "orders_lake"}, "columns": [{"name": "id", "type": "integer"}, {"name": "total", "type": "double"}]}]});

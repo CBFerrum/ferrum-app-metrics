@@ -682,18 +682,41 @@ fn statements_refused() -> SQLOptions {
 
 struct Shared {
     engine: Arc<Engine>,
-    token: String,
+    tokens: Vec<String>,
 }
 
-/// The engine over HTTP until `shutdown`: `POST /query` and `POST /check` with the bearer token Metrics
-/// holds, and `GET /health`.
+/// The tokens Metrics may send: each line of the file `file` where one is named (`FERRUM_METRICS_ENGINE_TOKEN_FILE`, as
+/// the service metrics-engine renders it: the current token first, and the one before while a rotation's overlap lasts),
+/// else `token` (`FERRUM_METRICS_ENGINE_TOKEN`); each at least 32 characters. Why not, in plain words, never a token.
+pub fn tokens(file: Option<&std::path::Path>, token: Option<String>) -> Result<Vec<String>, String> {
+    let tokens: Vec<String> = match file {
+        Some(path) => std::fs::read_to_string(path)
+            .map_err(|e| format!("{} cannot be read: {e}", path.display()))?
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect(),
+        None => token.into_iter().collect(),
+    };
+    if tokens.is_empty() {
+        return Err("no token: FERRUM_METRICS_ENGINE_TOKEN_FILE names an empty file, or FERRUM_METRICS_ENGINE_TOKEN is not set".into());
+    }
+    if tokens.iter().any(|t| t.len() < 32) {
+        return Err("a token is at least 32 characters".into());
+    }
+    Ok(tokens)
+}
+
+/// The engine over HTTP until `shutdown`: `POST /query` and `POST /check` with a bearer token Metrics holds (any of
+/// `tokens`), and `GET /health`.
 pub async fn serve(
     listener: tokio::net::TcpListener,
     engine: Arc<Engine>,
-    token: String,
+    tokens: Vec<String>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    let shared = Arc::new(Shared { engine, token });
+    let shared = Arc::new(Shared { engine, tokens });
     let app = Router::new()
         .route("/health", get(health))
         .route("/query", post(query))
@@ -712,15 +735,16 @@ fn refusal(status: u16, message: impl Into<String>) -> Response {
     (status, Json(json!({"error": message.into()}))).into_response()
 }
 
-/// The bearer token, compared in time that does not depend on where it differs.
-fn authorized(headers: &HeaderMap, token: &str) -> bool {
+/// The bearer token is one of `tokens`, each compared whole, in time that does not depend on where it differs.
+fn authorized(headers: &HeaderMap, tokens: &[String]) -> bool {
     let given = headers.get(AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).unwrap_or("");
-    !token.is_empty() && given.len() == token.len() && given.bytes().zip(token.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+    let same = |token: &str| !token.is_empty() && given.len() == token.len() && given.bytes().zip(token.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0;
+    tokens.iter().fold(false, |found, t| found | same(t))
 }
 
 /// The query in `body`, sent with Metrics' token; or the status and reason it is refused with.
 fn parse(headers: &HeaderMap, s: &Shared, body: &Bytes) -> Result<Query, (u16, String)> {
-    if !authorized(headers, &s.token) {
+    if !authorized(headers, &s.tokens) {
         return Err((401, "a bearer token is needed, Metrics' own".into()));
     }
     serde_json::from_slice(body).map_err(|e| (400, format!("not a query: {e}")))
@@ -786,11 +810,14 @@ mod tests {
 
     #[test]
     fn tokens_must_match_whole_and_names_are_plain() {
+        let t = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         let mut h = HeaderMap::new();
-        assert!(!authorized(&h, "secret-token"));
+        assert!(!authorized(&h, &t(&["secret-token"])));
         h.insert(AUTHORIZATION, "Bearer secret-token".parse().unwrap());
-        assert!(authorized(&h, "secret-token"));
-        assert!(!authorized(&h, "secret-tokeN") && !authorized(&h, "secret-token-longer") && !authorized(&h, ""));
+        assert!(authorized(&h, &t(&["secret-token"])));
+        assert!(authorized(&h, &t(&["the-new-token", "secret-token"])) && authorized(&h, &t(&["secret-token", "the-new-token"])), "any of them");
+        assert!(!authorized(&h, &t(&["secret-tokeN"])) && !authorized(&h, &t(&["secret-token-longer"])) && !authorized(&h, &t(&[""])));
+        assert!(!authorized(&h, &[]));
         assert!(simple_name("orders_lake2") && !simple_name("Orders") && !simple_name("2x") && !simple_name("a.b"));
     }
 }

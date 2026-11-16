@@ -86,6 +86,9 @@ The configuration lists the datasets and the limits:
 - **The server** needs `FERRUM_METRICS_ENGINE_URL` (for example `http://metrics-engine:5180`, a private
   address) and the same `FERRUM_METRICS_ENGINE_TOKEN`. Without them, an external metric is refused when saved
   and has no value when read, saying the engine is not set up.
+- **The token from the vault.** `FERRUM_METRICS_ENGINE_TOKEN_FILE` names a file of tokens, one a line, in place
+  of `FERRUM_METRICS_ENGINE_TOKEN`: what `ferrum task render service:metrics-engine to:<dir>` writes as the
+  engine starts (the current token, and the one before while a rotation's overlap lasts). Any line is taken.
 - **Health.** `GET /health` answers `{"ok": true, "datasets": n}` without a token. On SIGTERM the engine stops
   taking work and finishes what it holds.
 - **Image.** Published from main as `ghcr.io/cbferrum/ferrum-metrics-engine` (`latest` and `sha-<commit>`),

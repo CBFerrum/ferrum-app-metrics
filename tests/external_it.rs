@@ -99,7 +99,7 @@ async fn scenario(dir: PathBuf, listener: std::net::TcpListener) {
     let csv = |name: &str| Dataset { name: name.into(), workspace: "lake".into(), format: Format::Csv, path: dir.join("orders.csv") };
     let engine = Arc::new(Engine::new(Config { datasets: vec![csv("orders_lake")], limits: Limits::default() }).unwrap());
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(ferrum_metrics_engine::serve(listener, engine, TOKEN.into(), async {
+    let server = tokio::spawn(ferrum_metrics_engine::serve(listener, engine, vec![TOKEN.into()], async {
         let _ = stopped.await;
     }));
 
