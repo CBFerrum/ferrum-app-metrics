@@ -2,8 +2,8 @@
 //!
 //! * `FERRUM_METRICS_ENGINE_CONFIG`: the operator's JSON file of datasets and limits (see the crate's docs).
 //! * `FERRUM_METRICS_ENGINE_TOKEN_FILE`: a file of the tokens Metrics may send, one a line (what the service
-//!   metrics-engine renders: the current one, and the one before while a rotation's overlap lasts);
-//!   `FERRUM_METRICS_ENGINE_TOKEN` otherwise, the one token. Each at least 32 characters.
+//!   metrics-engine renders: the current one, and the one before while a rotation's overlap lasts). Each at least 32
+//!   characters.
 //! * `FERRUM_METRICS_ENGINE_ADDR`: where it listens; `127.0.0.1:5180` unless set.
 //!
 //! It stops taking work on SIGTERM or Ctrl-C and finishes what it holds.
@@ -29,8 +29,8 @@ async fn run() -> Result<(), String> {
     let path = std::env::var("FERRUM_METRICS_ENGINE_CONFIG").map_err(|_| "FERRUM_METRICS_ENGINE_CONFIG names no configuration file".to_string())?;
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{path} cannot be read: {e}"))?;
     let config: Config = serde_json::from_str(&text).map_err(|e| format!("{path} is not a configuration: {e}"))?;
-    let file = std::env::var_os("FERRUM_METRICS_ENGINE_TOKEN_FILE").map(std::path::PathBuf::from);
-    let tokens = ferrum_metrics_engine::tokens(file.as_deref(), std::env::var("FERRUM_METRICS_ENGINE_TOKEN").ok())?;
+    let file = std::env::var_os("FERRUM_METRICS_ENGINE_TOKEN_FILE").ok_or_else(|| "FERRUM_METRICS_ENGINE_TOKEN_FILE names no token file".to_string())?;
+    let tokens = ferrum_metrics_engine::tokens(std::path::Path::new(&file))?;
     let addr = std::env::var("FERRUM_METRICS_ENGINE_ADDR").unwrap_or_else(|_| "127.0.0.1:5180".into());
     for d in &config.datasets {
         if !d.path.exists() {

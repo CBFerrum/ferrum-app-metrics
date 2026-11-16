@@ -685,22 +685,19 @@ struct Shared {
     tokens: Vec<String>,
 }
 
-/// The tokens Metrics may send: each line of the file `file` where one is named (`FERRUM_METRICS_ENGINE_TOKEN_FILE`, as
-/// the service metrics-engine renders it: the current token first, and the one before while a rotation's overlap lasts),
-/// else `token` (`FERRUM_METRICS_ENGINE_TOKEN`); each at least 32 characters. Why not, in plain words, never a token.
-pub fn tokens(file: Option<&std::path::Path>, token: Option<String>) -> Result<Vec<String>, String> {
-    let tokens: Vec<String> = match file {
-        Some(path) => std::fs::read_to_string(path)
-            .map_err(|e| format!("{} cannot be read: {e}", path.display()))?
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(str::to_string)
-            .collect(),
-        None => token.into_iter().collect(),
-    };
+/// The tokens Metrics may send: each line of the file `file` (`FERRUM_METRICS_ENGINE_TOKEN_FILE`, as the service
+/// metrics-engine renders it: the current token first, and the one before while a rotation's overlap lasts); each at
+/// least 32 characters. Why not, in plain words, never a token.
+pub fn tokens(file: &std::path::Path) -> Result<Vec<String>, String> {
+    let tokens: Vec<String> = std::fs::read_to_string(file)
+        .map_err(|e| format!("{} cannot be read: {e}", file.display()))?
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
     if tokens.is_empty() {
-        return Err("no token: FERRUM_METRICS_ENGINE_TOKEN_FILE names an empty file, or FERRUM_METRICS_ENGINE_TOKEN is not set".into());
+        return Err(format!("no token: {} is empty", file.display()));
     }
     if tokens.iter().any(|t| t.len() < 32) {
         return Err("a token is at least 32 characters".into());

@@ -6,7 +6,7 @@
 //! refusals, nothing made or written; no token in a log, an error or the vault's record.
 
 use ferrum_kernel::companion::{self, Rendered};
-use ferrum_kernel::vault::{self, Kdf, Opener, Scope, Vault};
+use ferrum_kernel::vault::{self, Kdf, New, Opener, Rule, Scope, Vault, Zeroizing};
 use ferrum_kernel::{Db, DbConfig, Error, HookRegistry, Kernel, KernelSettings};
 use ferrum_meta::Catalog;
 use ferrum_metrics_engine::{Config, Engine, Limits};
@@ -20,21 +20,22 @@ fn url() -> String {
 }
 
 /// A replica: its own pool, its vault opened with `database_url`'s password (none: nothing to make the first slot with),
-/// Metrics registered as the server registers it; and Metrics' handle.
-async fn replica(database_url: String) -> (Arc<Kernel>, Vault) {
+/// Metrics registered as the server registers it; Metrics' handle, and the platform's (what the operator acts through).
+async fn replica(database_url: String) -> (Arc<Kernel>, Vault, Vault) {
     let db = Db::connect(DbConfig { url: url(), max_connections: 8, ..Default::default() }).await.expect("connect");
     let opener = Opener { database_url, file: "/nonexistent/root.key".into(), kdf: Kdf { m_kib: 64, t: 1, p: 1 }, ..Default::default() };
     vault::open(&db, opener, false).await.expect("the vault");
     let mut packages = ferrum_domain::packages().expect("platform packages");
     packages.extend(ferrum_app_metrics::packages().expect("app packages"));
     let mut hooks = HookRegistry::default();
+    let platform = hooks.platform_vault();
     let mut metrics = None;
     hooks.app("metrics", &[], |h| {
         ferrum_app_metrics::register(h);
         metrics = Some(h.vault());
     });
     let k = Kernel::boot(db, Catalog::from_packages(packages).expect("catalog"), hooks, KernelSettings::default(), None).await.expect("boot");
-    (k, metrics.expect("Metrics' handle"))
+    (k, metrics.expect("Metrics' handle"), platform)
 }
 
 fn given(pairs: &[(&str, String)]) -> impl Fn(&str) -> Option<String> + Sync + use<> {
@@ -63,7 +64,7 @@ impl Drop for Running {
 }
 
 async fn engine_on(file: &Path, port: u16) -> Running {
-    let tokens = ferrum_metrics_engine::tokens(Some(file), None).expect("the engine's tokens");
+    let tokens = ferrum_metrics_engine::tokens(file).expect("the engine's tokens");
     let engine = Arc::new(Engine::new(Config { datasets: vec![], limits: Limits::default() }).unwrap());
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.expect("the engine's port");
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -139,8 +140,8 @@ async fn scenario(logs: Logs) {
     let db = Db::connect(DbConfig { url: url(), max_connections: 2, ..Default::default() }).await.expect("connect");
     sqlx::raw_sql("drop schema if exists vault cascade; drop schema if exists public cascade; create schema public;").execute(&db.pool).await.expect("reset");
     // The second registered last: its handle is the one Metrics' own code keeps (keys.rs).
-    let (k2, _) = replica(url()).await;
-    let (k, metrics) = replica(url()).await;
+    let (k2, _, _) = replica(url()).await;
+    let (k, metrics, platform) = replica(url()).await;
     let mut errors: Vec<String> = Vec::new();
     let listed = k.companions(&given(&[])).await;
     assert_eq!(
@@ -157,7 +158,7 @@ async fn scenario(logs: Logs) {
     let address = format!("http://127.0.0.1:{port}");
     ferrum_kernel::env::set([("FERRUM_METRICS_ENGINE_URL".to_string(), Some(address.clone()))].into());
     let e = ferrum_app_metrics::ask_engine(&k, "check", &json!({})).await.unwrap_err().to_string();
-    assert!(e.contains("its token is in neither FERRUM_METRICS_ENGINE_TOKEN nor Metrics' vault"), "{e}");
+    assert!(e.contains("Metrics' vault holds no engine.token"), "{e}");
     errors.push(e);
 
     // ── made by the first render, once, though two replicas render at once; one line, bound to the engine's host ──
@@ -213,13 +214,11 @@ async fn scenario(logs: Logs) {
     assert!(taken(&k).await && status(port, &first).await == 401, "the token before is left out");
     drop(running);
 
-    // ── kept, where Metrics 0.8 copied the engine's token from the environment ──
+    // ── kept, where the operator set the engine's token before a render made one ──
     metrics.remove(&k, Scope::Installation, "engine.token").await.unwrap();
     let typed = "the-engines-token-typed-for-both-0123456789";
-    ferrum_kernel::env::set(
-        [("FERRUM_METRICS_ENGINE_URL".to_string(), Some(address.clone())), ("FERRUM_METRICS_ENGINE_TOKEN".to_string(), Some(typed.to_string()))].into(),
-    );
-    ferrum_app_metrics::maintenance(&k).await.expect("adopted");
+    let at_engine = Rule { hosts: vec!["127.0.0.1".to_string()], ..Default::default() };
+    platform.operator_set(&k, "metrics", "engine.token", New::Value(Zeroizing::new(typed.as_bytes().to_vec())), at_engine).await.expect("the operator's");
     let kept = k.render("metrics-engine", &given(&[])).await.expect("kept: nothing is made, so the address is not needed");
     assert!(token_file(&kept) == format!("{typed}\n"), "the token the engine already takes");
     assert_eq!(events(&k, "manage").await.len(), 1);
@@ -235,7 +234,7 @@ async fn scenario(logs: Logs) {
 
     // ── a closed vault (a fresh database, and nothing to make its first slot with): refused, nothing written ──
     sqlx::raw_sql("drop schema if exists vault cascade; drop schema if exists public cascade; create schema public;").execute(&db.pool).await.expect("reset");
-    let (closed, _) = replica(url().replacen("ferrum:ferrum@", "ferrum@", 1)).await;
+    let (closed, _, _) = replica(url().replacen("ferrum:ferrum@", "ferrum@", 1)).await;
     let e = closed.render("metrics-engine", &at).await.unwrap_err().to_string();
     assert!(e.starts_with("the vault is closed"), "{e}");
     assert!(closed.rotate_companion("metrics-engine", &at).await.unwrap_err().to_string().starts_with("the vault is closed"));

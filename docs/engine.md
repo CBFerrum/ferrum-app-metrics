@@ -62,7 +62,7 @@ It is stale when any part is, and has no value when any part has none.
 
 ```bash
 FERRUM_METRICS_ENGINE_CONFIG=/etc/ferrum/engine.json \
-FERRUM_METRICS_ENGINE_TOKEN=<at least 32 characters> \
+FERRUM_METRICS_ENGINE_TOKEN_FILE=<dir>/token \
 FERRUM_METRICS_ENGINE_ADDR=0.0.0.0:5180 \
 ferrum-metrics-engine
 ```
@@ -83,12 +83,14 @@ The configuration lists the datasets and the limits:
   workspaces may each have a dataset of the same name. A path is absolute: one file, or a directory of files
   of that format. When it was written is the newest file's time. A dataset missing at start is reported, and
   a query of it then says it cannot be read.
-- **The server** needs `FERRUM_METRICS_ENGINE_URL` (for example `http://metrics-engine:5180`, a private
-  address) and the same `FERRUM_METRICS_ENGINE_TOKEN`. Without them, an external metric is refused when saved
-  and has no value when read, saying the engine is not set up.
-- **The token from the vault.** `FERRUM_METRICS_ENGINE_TOKEN_FILE` names a file of tokens, one a line, in place
-  of `FERRUM_METRICS_ENGINE_TOKEN`: what `ferrum task render service:metrics-engine to:<dir>` writes as the
-  engine starts (the current token, and the one before while a rotation's overlap lasts). Any line is taken.
+- **The server** needs the engine's address, the setting `metrics.engine_url` (for example
+  `http://metrics-engine:5180`, a private address). Without it, or before the token is made, an external metric
+  is refused when saved and has no value when read, saying the engine is not set up.
+- **The token, from the vault.** `FERRUM_METRICS_ENGINE_TOKEN_FILE` names a file of tokens, one a line: what
+  `ferrum task render service:metrics-engine to:<dir>` writes as the engine starts (the current token, and the
+  one before while a rotation's overlap lasts). The vault makes Metrics' `engine.token` at the first render,
+  bound to the host of `metrics.engine_url`, or keeps one an operator set. Any line is taken; each is at least
+  32 characters. Metrics sends the vault's token, and only to the hosts its rule names.
 - **Health.** `GET /health` answers `{"ok": true, "datasets": n}` without a token. On SIGTERM the engine stops
   taking work and finishes what it holds.
 - **Image.** Published from main as `ghcr.io/cbferrum/ferrum-metrics-engine` (`latest` and `sha-<commit>`),

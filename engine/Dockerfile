@@ -1,8 +1,7 @@
 # Metrics' engine for external sources, as a container. Built from this repository's root:
 #   docker build -f engine/Dockerfile -t ferrum-metrics-engine .
-# It runs as an unprivileged user and needs FERRUM_METRICS_ENGINE_CONFIG and FERRUM_METRICS_ENGINE_TOKEN (or
-# FERRUM_METRICS_ENGINE_TOKEN_FILE)
-# (docs/engine.md); its datasets are mounted read-only where its configuration says.
+# It runs as an unprivileged user and needs FERRUM_METRICS_ENGINE_CONFIG and FERRUM_METRICS_ENGINE_TOKEN_FILE
+# (docs/engine.md); its datasets are mounted read-only where its configuration says, and its token file beside them.
 FROM rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS build
 WORKDIR /src
 COPY . .
