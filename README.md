@@ -7,7 +7,7 @@
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-0.7.4-0f766e?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.10.1-0f766e?style=flat-square)](CHANGELOG.md)
 [![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Ferrum platform](https://img.shields.io/badge/runs%20on-Ferrum-2f5bea?style=flat-square)](https://github.com/CBFerrum/Ferrum)
 ![Rust](https://img.shields.io/badge/Rust-server%20and%20engine-b7410e?style=flat-square&logo=rust)
@@ -342,6 +342,7 @@ Metrics is compared with Klipfolio (PowerMetrics), Geckoboard, Databox, Microsof
 
 ### ✅ Recently shipped
 
+- [x] **0.10.1** Rebuilt on Ferrum-Frontend 06bd1a2: its start through `mountApp`, and no routes to the screens apps no longer have.
 - [x] **0.7.4** Rebuilt on the tuned design system: better menu icons, a lighter first page, cleaner print.
 - [x] **0.7.3** The redesigned interface on the upgraded design system, with shaped loading and told-apart states.
 - [x] **0.7.2** A dataset's parse errors no longer reach readers with their raw rows; readers are not told where the engine or the files are.
