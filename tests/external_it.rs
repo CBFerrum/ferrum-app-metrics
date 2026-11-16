@@ -12,7 +12,6 @@
 //! All: 185.5. North: 150. South: 35.5. Ann's, by address in any case: 125.5. Per customer (two of them),
 //! for a reader of the North: 75. Against a real PostgreSQL (`FERRUM_METRICS_TEST_DATABASE_URL`).
 
-use ferrum_kernel::secret::SecretKey;
 use ferrum_kernel::tenant::NewTenant;
 use ferrum_kernel::vault::{New, Rule, Scope, Zeroizing};
 use ferrum_kernel::{Ctx, Db, DbConfig, Doc, Error, HookRegistry, Kernel, KernelSettings};
@@ -118,8 +117,7 @@ async fn scenario(dir: PathBuf, listener: std::net::TcpListener) {
         vault = Some(h.vault());
     });
     let vault = vault.expect("Metrics' handle");
-    let settings = KernelSettings { secret_key: Some(SecretKey::new([7u8; 32])), ..Default::default() };
-    let k: Arc<Kernel> = Kernel::boot(db, Catalog::from_packages(packages).expect("catalog"), hooks, settings, None).await.expect("boot");
+    let k: Arc<Kernel> = Kernel::boot(db, Catalog::from_packages(packages).expect("catalog"), hooks, KernelSettings::default(), None).await.expect("boot");
     ferrum_domain::maintenance(&k).await.expect("partitions");
     let tenant = k
         .create_tenant(NewTenant {
