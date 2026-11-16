@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.0
+
+Needs platform 0.3.9 (Ferrum `22d082f7` or later), which reads apps' operator settings. No database or interface change.
+
+**The engine's address is a setting.** Metrics declares `metrics.engine_url` (`FERRUM_METRICS_ENGINE_URL`), kept in the
+server's settings table and read at each use, so a change applies on every replica within seconds. The variable, when
+set, still wins through this release.
+
+**The engine's token lives in Metrics' own vault**, as the installation's secret `engine.token`: never revealed, put on
+each request to the engine by the vault, and only for the hosts its rule names. `FERRUM_METRICS_ENGINE_TOKEN`, while it
+is set, still wins and is kept in the vault once (under a database lock, so replicas starting together keep it once),
+bound to the host of the engine's address at that moment. With neither, an external metric is refused with "Metrics'
+engine for external sources is not set up on this server: its token is in neither FERRUM_METRICS_ENGINE_TOKEN nor
+Metrics' vault (engine.token)". An address moved to a host the token's rule does not name is refused, saying so: change
+the secret's rule with the address (`PUT /api/operator/secrets/metrics/engine.token/rule`). Before, the token went to
+whatever address was set.
+
+**Metrics takes a vault handle** in its registration (`HookRegistry::app("metrics", …)`), as the server registers it.
+
 ## 0.7.4
 
 Rebuilt with Ferrum-Frontend 9e7190c, the design system as tuned after the landed build was reviewed. The left menu's icons are chosen so that none repeats on more than three rows and each fits its row; their drawings load beside the first page instead of inside it, so the page starts lighter; a row that scrolls sideways fades at the edge where there is more, in every browser and with reduced motion; a printed record leaves out empty fields and keeps its totals with the table; menus and popovers sit inside the page's landmarks for assistive technology; a selection bar folds what does not fit into More on a narrow screen. Nothing else changes.

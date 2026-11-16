@@ -41,7 +41,7 @@ Metrics is the governed metrics layer of Ferrum. A metric or a dataset is define
 | **Version** | 0.7.4 (package `metrics` 0.1.0) |
 | **Kind** | Its own interface at `/kpis/` (certified metrics by domain, certified datasets) with Ferrum's records screens for everything else, and a separate engine service for external files |
 | **What it adds** | 7 entities (Metric, Dataset, Business Term, Metric Value, Followed Metric, External Source and a small Term table), 3 roles, 1 module, 6 endpoints, 1 upkeep job (followed digests), 1 notification kind, no reports, no print formats |
-| **Depends on** | Ferrum platform `>=0.3.2, <0.4` (core, Studio and the calculation crate); the optional engine for external datasets |
+| **Depends on** | Ferrum platform `>=0.3.9, <0.4` (core, Studio and the calculation crate); the optional engine for external datasets |
 | **Works with** | Objectives (key results measured by a metric), Intelligence (questions about metrics), ERP and any app whose records a metric counts, warehouses and loaders |
 | **Languages** | English, Arabic and Hindi (28 interface words each) with names in Arabic and Hindi, right-to-left |
 | **Tests** | 28 Rust tests (against a real PostgreSQL, the engine alone, and the engine beside the kernel over HTTP), 5 interface tests |
@@ -234,7 +234,7 @@ FERRUM_METRICS_ENGINE_ADDR=0.0.0.0:5180 \
 ferrum-metrics-engine
 ```
 
-The server needs `FERRUM_METRICS_ENGINE_URL` and the same token. The image is published from main by CI as `ghcr.io/cbferrum/ferrum-metrics-engine` (`latest` and `sha-<commit>`) after CI has run it read-only and unprivileged and asked it as Metrics does. For amounts, use Parquet with decimal columns: a CSV column of numbers is read as floating point. See [docs/engine.md](docs/engine.md).
+The server needs the engine's address, the setting `metrics.engine_url` (`ferrum task settings set`, or `FERRUM_METRICS_ENGINE_URL`), and the same token as Metrics' secret `engine.token` in the installation's vault (`PUT /api/operator/secrets/metrics/engine.token` with the token and `{"rule": {"hosts": ["<the engine's host>"]}}`), or `FERRUM_METRICS_ENGINE_TOKEN`, which wins while it is set and is kept in the vault once, for the host of the address then. The token goes only to the hosts its rule names: after moving the engine to another host, change the rule too. The image is published from main by CI as `ghcr.io/cbferrum/ferrum-metrics-engine` (`latest` and `sha-<commit>`) after CI has run it read-only and unprivileged and asked it as Metrics does. For amounts, use Parquet with decimal columns: a CSV column of numbers is read as floating point. See [docs/engine.md](docs/engine.md).
 
 ## 🧱 Data model
 
@@ -377,13 +377,13 @@ Metrics is compared with Klipfolio (PowerMetrics), Geckoboard, Databox, Microsof
 
 ## 🚀 Install
 
-Metrics is a native Ferrum app for platform `>=0.3.2, <0.4`.
+Metrics is a native Ferrum app for platform `>=0.3.9, <0.4`.
 
 1. In Ferrum, open the **App Manager** (or the store) and install **Metrics**. Self-hosters who build their own server image include the `metrics` app with the others.
 2. Give roles: **Metric Author** to people who define, **Data Steward** to those who certify (a metric's owner can never certify it), **Metric Reader** to everyone who reads.
 3. Open **Metrics**, choose **New metric**, build the query in the form, and save. Ask a steward to **Certify It**.
 4. Add **Glossary** terms for the words the business uses and link them from metrics.
-5. For metrics over files in a data lake: run the engine (see Metrics' engine above), set `FERRUM_METRICS_ENGINE_URL` and the token on the server, and add an **External Source** for each dataset with its freshness and who sees which rows and columns.
+5. For metrics over files in a data lake: run the engine (see Metrics' engine above), set the engine's address and its token on the server (above), and add an **External Source** for each dataset with its freshness and who sees which rows and columns.
 6. For a warehouse feed, give the loader an API key for a person with Metric Reader and use the dataset and values addresses.
 7. Followers choose how they hear about **Metrics you follow** in their notification settings.
 

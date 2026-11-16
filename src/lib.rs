@@ -24,6 +24,7 @@
 mod dataset;
 mod delivery;
 mod engine;
+mod keys;
 mod metric;
 mod site;
 mod warehouse;
@@ -48,6 +49,7 @@ pub fn packages() -> std::result::Result<Vec<ferrum_meta::Package>, ferrum_meta:
 
 /// Registers this app's document hooks, and its endpoint.
 pub fn register(hooks: &mut HookRegistry) {
+    keys::remember(hooks.vault());
     hooks
         .register("Metric", Arc::new(metric::MetricHook))
         .register("Dataset", Arc::new(dataset::DatasetHook))
@@ -63,6 +65,10 @@ pub fn reports() -> Vec<Arc<dyn ReportSource>> {
 
 /// Upkeep: each workspace's followed metrics delivered on the day they are due.
 pub async fn maintenance(k: &Kernel) -> Result<()> {
+    // The engine's token from the environment, kept in Metrics' vault once (keys.rs), even before the engine is asked.
+    if let Err(e) = keys::adopt(k).await {
+        tracing::warn!(error = %e, "Metrics could not keep the engine's token from the environment in its vault");
+    }
     let mut tx = k.db.system_tx().await?;
     let tenants: Vec<Uuid> = sqlx::query_scalar("select id from tenant where status = 'active' order by id").fetch_all(&mut *tx).await?;
     tx.commit().await?;
@@ -91,5 +97,14 @@ mod tests {
         let files = UI.iter().map(|(p, b)| (p.to_string(), b.to_vec())).collect();
         let ui = ferrum_apps::ui::prepare("metrics", files).expect("ui/dist is an interface release");
         assert!(UI.iter().any(|(p, _)| *p == "index.html") && !UI.iter().any(|(p, _)| p.starts_with('.')), "{}", ui.digest);
+    }
+
+    /// The engine's address is declared under the name the platform's registry moves to Metrics (`app: metrics`), read at
+    /// each use, and given the environment's token while it is set; the token itself is no setting.
+    #[test]
+    fn its_engine_address_is_a_declared_setting() {
+        let m = ferrum_apps::AppManifest::parse(MANIFEST).expect("app.yaml");
+        let s: Vec<_> = m.operator_settings.iter().map(|s| (s.key.as_str(), s.env.as_str(), s.applies.as_str(), s.sends.as_deref())).collect();
+        assert_eq!(s, [("engine_url", "FERRUM_METRICS_ENGINE_URL", "live", Some("FERRUM_METRICS_ENGINE_TOKEN"))]);
     }
 }
