@@ -591,7 +591,7 @@ pub(crate) async fn series(k: &Kernel, ctx: &Ctx, doc: &Doc, bucket: Bucket, per
     if !(1..=120).contains(&periods) {
         return Err(Error::field("periods", "is 1 to 120"));
     }
-    let (today, fy) = (Utc::now().date_naive(), ctx.fy_start_month);
+    let (today, fy) = (ctx.today(), ctx.fy_start_month);
     let from = period_start(bucket, today, periods - 1, fy).ok_or_else(|| Error::field("periods", "reach further back than dates go"))?;
     let current = period_start(bucket, today, 0, fy).unwrap_or(today).to_string();
     let values = series_at(k, ctx, doc, bucket, from, today, 0).await?;

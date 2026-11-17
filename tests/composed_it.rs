@@ -157,4 +157,15 @@ async fn scenario() {
     // A part deprecated: the composed metric says so rather than meaning something else.
     act(uid(&terms["id"]), "deprecate", json!({"replaced_by": count["id"]})).await.unwrap();
     refused(value(&k, &director, "Average company terms").await, "Company terms is not certified");
+
+    // The period not yet over is the one holding the workspace's today, not UTC's. No clock is set: the workspace moves
+    // to a zone whose day is not UTC's now (Pago Pago before 10:00 UTC, Kiritimati after, as the platform's suites do).
+    use chrono::Timelike;
+    let zone = if chrono::Utc::now().hour() < 10 { "Pacific/Pago_Pago" } else { "Pacific/Kiritimati" };
+    k.update_tenant_settings(&admin, &obj(json!({"timezone": zone}))).await.expect("the workspace's zone");
+    let director = k.load_ctx(tenant, director.user, None, "it".into()).await.expect("ctx");
+    assert_ne!(director.today(), chrono::Utc::now().date_naive(), "{zone}'s day is not UTC's");
+    let daily = ask(&k, &director, "/series", json!({"metric": "Company customers", "bucket": "day", "periods": "1"})).await.unwrap();
+    let today = &daily["points"][0];
+    assert_eq!((today["start"].as_str(), today["partial"].as_bool()), (Some(director.today().to_string().as_str()), Some(true)), "{daily}");
 }
