@@ -13,7 +13,7 @@
 ![Rust](https://img.shields.io/badge/Rust-server%20and%20engine-b7410e?style=flat-square&logo=rust)
 ![TypeScript](https://img.shields.io/badge/React-TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-data-336791?style=flat-square&logo=postgresql&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-28%20Rust%20%C2%B7%205%20UI-16a34a?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-31%20Rust%20%C2%B7%205%20UI-16a34a?style=flat-square)
 
 ### Define every number the company steers by once, certify it, and let each person read it with their own rights.
 
@@ -38,13 +38,13 @@ Metrics is the governed metrics layer of Ferrum. A metric or a dataset is define
 
 | | |
 |---|---|
-| **Version** | 0.9.0 (package `metrics` 0.1.0) |
+| **Version** | 0.10.1 (package `metrics` 0.1.0) |
 | **Kind** | Its own interface at `/kpis/` (certified metrics by domain, certified datasets) with Ferrum's records screens for everything else, and a separate engine service for external files |
 | **What it adds** | 7 entities (Metric, Dataset, Business Term, Metric Value, Followed Metric, External Source and a small Term table), 3 roles, 1 module, 6 endpoints, 1 upkeep job (followed digests), 1 notification kind, no reports, no print formats |
 | **Depends on** | Ferrum platform `>=0.3.9, <0.4` (core, Studio and the calculation crate); the optional engine for external datasets |
 | **Works with** | Objectives (key results measured by a metric), Intelligence (questions about metrics), ERP and any app whose records a metric counts, warehouses and loaders |
-| **Languages** | English, Arabic and Hindi (28 interface words each) with names in Arabic and Hindi, right-to-left |
-| **Tests** | 28 Rust tests (against a real PostgreSQL, the engine alone, and the engine beside the kernel over HTTP), 5 interface tests |
+| **Languages** | English, Arabic and Hindi (14 interface words and 95 names in each), right-to-left |
+| **Tests** | 31 Rust tests (against a real PostgreSQL, the engine alone, and the engine beside the kernel over HTTP), 5 interface tests |
 | **Licence** | AGPL-3.0-only |
 
 ## 📸 Screenshots
@@ -234,7 +234,7 @@ FERRUM_METRICS_ENGINE_ADDR=0.0.0.0:5180 \
 ferrum-metrics-engine
 ```
 
-The server needs the engine's address, the setting `metrics.engine_url` (`ferrum task settings set`, or `FERRUM_METRICS_ENGINE_URL`). The token is Metrics' secret `engine.token` in the installation's vault, and the engine takes it from there as it starts: `ferrum task render service:metrics-engine to:<dir>` writes `<dir>/token` (the vault makes the token at the first render, bound to the host of `metrics.engine_url`, or keeps one an operator set before it with `PUT /api/operator/secrets/metrics/engine.token` and `{"rule": {"hosts": ["<the engine's host>"]}}`), and the engine reads that file. The token goes only to the hosts its rule names: after moving the engine to another host, change the rule too. Rotate with `ferrum task vault_rotate level:service service:metrics-engine` and restart the engine within a day: until then Metrics sends the token before, which the file still lists. The image is published from main by CI as `ghcr.io/cbferrum/ferrum-metrics-engine` (`latest` and `sha-<commit>`) after CI has run it read-only and unprivileged and asked it as Metrics does. For amounts, use Parquet with decimal columns: a CSV column of numbers is read as floating point. See [docs/engine.md](docs/engine.md).
+The server needs the engine's address, the setting `metrics.engine_url` (`ferrum task set key:metrics.engine_url value:http://metrics-engine:5180`, or `FERRUM_METRICS_ENGINE_URL`). The token is Metrics' secret `engine.token` in the installation's vault, and the engine takes it from there as it starts: `ferrum task render service:metrics-engine to:<dir>` writes `<dir>/token` (the vault makes the token at the first render, bound to the host of `metrics.engine_url`, or keeps one an operator set before it with `PUT /api/operator/secrets/metrics/engine.token` and `{"rule": {"hosts": ["<the engine's host>"]}}`), and the engine reads that file. The token goes only to the hosts its rule names: after moving the engine to another host, change the rule too. Rotate with `ferrum task vault_rotate level:service service:metrics-engine` and restart the engine within a day: until then Metrics sends the token before, which the file still lists. The image is published from main by CI as `ghcr.io/cbferrum/ferrum-metrics-engine` (`latest` and `sha-<commit>`) after CI has run it read-only and unprivileged and asked it as Metrics does. For amounts, use Parquet with decimal columns: a CSV column of numbers is read as floating point. See [docs/engine.md](docs/engine.md).
 
 ## 🧱 Data model
 
@@ -343,6 +343,9 @@ Metrics is compared with Klipfolio (PowerMetrics), Geckoboard, Databox, Microsof
 ### ✅ Recently shipped
 
 - [x] **0.10.1** Rebuilt on Ferrum-Frontend 06bd1a2: its start through `mountApp`, and no routes to the screens apps no longer have.
+- [x] **0.10.0** The engine's token has one home, Metrics' vault, and the engine reads only the token file the service renders.
+- [x] **0.9.0** The engine takes its token from the vault as it starts, through the service `metrics-engine`; rotation overlaps by a day.
+- [x] **0.8.0** The engine's address is a setting, `metrics.engine_url`, and the token is sent only to the host its rule names.
 - [x] **0.7.4** Rebuilt on the tuned design system: better menu icons, a lighter first page, cleaner print.
 - [x] **0.7.3** The redesigned interface on the upgraded design system, with shaped loading and told-apart states.
 - [x] **0.7.2** A dataset's parse errors no longer reach readers with their raw rows; readers are not told where the engine or the files are.
