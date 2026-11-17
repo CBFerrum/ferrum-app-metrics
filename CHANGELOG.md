@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.2
+
+Server only. Needs the same platform as 0.10.1. No database change, no interface change.
+
+- **A series ends on the workspace's day.** A metric's series took its current period and its last day from the UTC
+  day: east or west of UTC, for part of every day, the period marked current was yesterday's or tomorrow's (at a
+  month's or year's turn, the wrong month or fiscal year), and the workspace's today could fall outside it. It reads
+  the workspace's today now.
+
 ## 0.10.1
 
 Needs the same platform as 0.10.0. No database change. Interface only, `ui/dist` rebuilt with Ferrum-Frontend `06bd1a2`.
