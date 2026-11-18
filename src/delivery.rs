@@ -119,9 +119,6 @@ async fn deliver_one(k: &Kernel, ctx: &Ctx, tx: &mut Tx, metric_id: Uuid, follow
 /// own, so one that cannot be leaves the others delivered and keeps why. How many were due.
 pub(crate) async fn deliver(k: &Kernel, tenant: Uuid) -> Result<usize> {
     let schema = k.registry.schema(tenant).await?;
-    if !schema.packages.iter().any(|p| p == "metrics") {
-        return Ok(0);
-    }
     let ctx = Ctx::system(tenant, schema);
     // The workspace's day, not UTC's.
     let today = ctx.today();

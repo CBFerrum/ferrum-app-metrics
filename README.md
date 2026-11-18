@@ -7,7 +7,7 @@
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-0.10.2-0f766e?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.11.0-0f766e?style=flat-square)](CHANGELOG.md)
 [![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Ferrum platform](https://img.shields.io/badge/runs%20on-Ferrum-2f5bea?style=flat-square)](https://github.com/CBFerrum/Ferrum)
 ![Rust](https://img.shields.io/badge/Rust-server%20and%20engine-b7410e?style=flat-square&logo=rust)
@@ -38,10 +38,10 @@ Metrics is the governed metrics layer of Ferrum. A metric or a dataset is define
 
 | | |
 |---|---|
-| **Version** | 0.10.2 (package `metrics` 0.1.0) |
+| **Version** | 0.11.0 (package `metrics` 0.1.0) |
 | **Kind** | Its own interface at `/kpis/` (certified metrics by domain, certified datasets) with Ferrum's records screens for everything else, and a separate engine service for external files |
 | **What it adds** | 7 entities (Metric, Dataset, Business Term, Metric Value, Followed Metric, External Source and a small Term table), 3 roles, 1 module, 6 endpoints, 1 upkeep job (followed digests), 1 notification kind, no reports, no print formats |
-| **Depends on** | Ferrum platform `>=0.3.9, <0.4` (core, Studio and the calculation crate); the optional engine for external datasets |
+| **Depends on** | Ferrum platform `>=0.4.0, <0.5` (core, Studio and the calculation crate); the optional engine for external datasets |
 | **Works with** | Objectives (key results measured by a metric), Intelligence (questions about metrics), ERP and any app whose records a metric counts, warehouses and loaders |
 | **Languages** | English, Arabic and Hindi (14 interface words and 95 names in each), right-to-left |
 | **Tests** | 31 Rust tests (against a real PostgreSQL, the engine alone, and the engine beside the kernel over HTTP), 5 interface tests |
@@ -342,6 +342,7 @@ Metrics is compared with Klipfolio (PowerMetrics), Geckoboard, Databox, Microsof
 
 ### ✅ Recently shipped
 
+- [x] **0.11.0** Upkeep is one workspace's: needs Ferrum 0.4.0.
 - [x] **0.10.2** A series' current period is the one holding the workspace's today, not UTC's.
 - [x] **0.10.1** Rebuilt on Ferrum-Frontend 06bd1a2: its start through `mountApp`, and no routes to the screens apps no longer have.
 - [x] **0.10.0** The engine's token has one home, Metrics' vault, and the engine reads only the token file the service renders.
@@ -382,7 +383,7 @@ Metrics is compared with Klipfolio (PowerMetrics), Geckoboard, Databox, Microsof
 
 ## 🚀 Install
 
-Metrics is a native Ferrum app for platform `>=0.3.9, <0.4`.
+Metrics is a native Ferrum app for platform `>=0.4.0, <0.5`.
 
 1. In Ferrum, open the **App Manager** (or the store) and install **Metrics**. Self-hosters who build their own server image include the `metrics` app with the others.
 2. Give roles: **Metric Author** to people who define, **Data Steward** to those who certify (a metric's owner can never certify it), **Metric Reader** to everyone who reads.
