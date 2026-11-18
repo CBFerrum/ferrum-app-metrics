@@ -229,7 +229,7 @@ async fn scenario() {
             n
         }
     };
-    ferrum_app_metrics::maintenance(&k).await.expect("delivered");
+    ferrum_app_metrics::maintenance(&k, tenant).await.expect("delivered");
     // Each read with their own rights, kept as a value, and told.
     let h = t.get("MetricSubscription", uid(&hers["id"])).await;
     let d = t.get("MetricSubscription", uid(&his["id"])).await;
@@ -239,7 +239,7 @@ async fn scenario() {
     let kept = t.k.list(&rep1, "MetricSnapshot", &ListQuery::default()).await.unwrap().rows;
     assert!(kept.iter().any(|s| dec(&s["value"]) == 3.0), "kept as a value of hers");
     // Not again until it is due.
-    ferrum_app_metrics::maintenance(&k).await.expect("upkeep");
+    ferrum_app_metrics::maintenance(&k, tenant).await.expect("upkeep");
     assert_eq!((told(rep1.user).await, told(director.user).await), (1, 2), "once a day at most");
     // A metric deprecated since is said so once, and no longer delivered.
     t.act(&steward, terms, "deprecate", json!({"replaced_by": all_customers.to_string()})).await.unwrap();
@@ -251,7 +251,7 @@ async fn scenario() {
         .await
         .unwrap();
     tx.commit().await.unwrap();
-    ferrum_app_metrics::maintenance(&k).await.expect("upkeep");
+    ferrum_app_metrics::maintenance(&k, tenant).await.expect("upkeep");
     let gone = t.get("MetricSubscription", uid(&terms_follow["id"])).await;
     assert_eq!(gone["active"], false, "{gone:?}");
     assert_eq!(told(director.user).await, 3, "told it is deprecated, and what replaces it");

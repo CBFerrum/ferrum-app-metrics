@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0
+
+No database or interface change. Needs Ferrum 0.4.0 (apps' upkeep runs one workspace at a time, on whichever replica is free).
+
+- **Upkeep is one workspace's.** `maintenance(k, tenant)` delivers that workspace's followed metrics; the platform
+  calls it per workspace where Metrics is installed, so Metrics no longer lists workspaces or checks for itself.
+
 ## 0.10.2
 
 Server only. Needs the same platform as 0.10.1. No database change, no interface change.
