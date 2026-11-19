@@ -5,7 +5,7 @@
 //! (`warehouse`). `POST import/wren` reviews a Wren semantic model against the metrics defined here
 //! and brings in what a reviewer accepts, as drafts (`wren`).
 
-use ferrum_domain::util::{s, sys};
+use ferrum_domain::util::sys;
 use ferrum_kernel::{Error, Filter, Kernel, Result, Site, SiteRequest, SiteResponse};
 use serde_json::{Value, json};
 
@@ -38,29 +38,18 @@ impl Site for MetricsSite {
         tx.commit().await?;
         let metric = found.into_iter().next().ok_or_else(|| Error::NotFound("metric".into()))?;
         crate::metric::readable_state(k, user, "Metric", &metric).await?;
-        let as_of = chrono::Utc::now();
         let out = match path.as_str() {
             // Each period's value, the current one marked partial, and when it was worked out.
             "series" => {
                 let bucket: ferrum_studio::spec::Bucket = serde_json::from_value(json!(param("bucket").unwrap_or("month")))
                     .map_err(|_| Error::field("bucket", "is day, week, month, quarter, year, fiscal_quarter or fiscal_year"))?;
                 let periods: u32 = param("periods").map_or(Ok(12), str::parse).map_err(|_| Error::field("periods", "is a number"))?;
-                let points: Vec<Value> = crate::metric::series(k, user, &metric, bucket, periods)
-                    .await?
-                    .into_iter()
-                    .map(|p| json!({"start": p.start, "value": p.value, "partial": p.partial}))
-                    .collect();
-                json!({"metric": name, "bucket": bucket, "as_of": as_of, "unit": s(&metric, "unit"), "points": points})
+                crate::metric::series_json(k, user, &metric, bucket, periods).await?
             }
             // What a change to it reaches: the metrics composed of it, directly or by way of others.
-            "impact" => json!({"metric": name, "used_by": crate::metric::used_by_readable(k, user, name).await?}),
+            "impact" => crate::metric::impact_json(k, user, &metric).await?,
             // Its value, and the external datasets it was read from that are older than their sources allow.
-            _ => {
-                let r = crate::metric::read(k, user, &metric).await?;
-                let stale: Vec<Value> = r.stale.iter().map(|s| s.json()).collect();
-                json!({"metric": name, "value": ferrum_domain::util::money(r.value), "unit": s(&metric, "unit"), "certified": s(&metric, "status") == Some("Certified"),
-                       "description": s(&metric, "description"), "lineage": s(&metric, "uses"), "as_of": as_of, "stale": stale})
-            }
+            _ => crate::metric::value_json(k, user, &metric).await?,
         };
         let mut r = SiteResponse::json(200, &out);
         r.headers.push(("cache-control".into(), "no-store".into()));

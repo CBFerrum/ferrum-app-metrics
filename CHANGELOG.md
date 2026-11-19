@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0
+
+Package `metrics` 0.2.0 (its capabilities' version). Needs the same platform as 0.11.0. No database or interface change.
+
+- **A metric's value, series and impact are operations.** `metrics.metric.value`, `metrics.metric.series` (`bucket`,
+  `periods`) and `metrics.metric.impact` are queries of the gate: people's screens, Studio's capability tiles,
+  processes, other apps through `uses`, and agents over MCP read a metric the same way, with the caller's own rights,
+  writing nothing (before, only `/value`, `/series` and `/impact` gave them, and an agent's one way in was `snapshot`,
+  which keeps a value). The endpoints answer from the same functions; a draft is its owner's, a deprecated one names
+  its replacement, as there.
+
 ## 0.11.2
 
 Package only. Needs the same platform as 0.11.0. No database or interface change.

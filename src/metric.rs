@@ -592,6 +592,29 @@ fn value_at<'a>(k: &'a Kernel, ctx: &'a Ctx, doc: &'a Doc, depth: usize) -> Valu
     })
 }
 
+/// A metric's value for `ctx`, as Metrics answers it wherever it is asked (the `value` operation, `/value`).
+pub(crate) async fn value_json(k: &Kernel, ctx: &Ctx, doc: &Doc) -> Result<Value> {
+    let r = read(k, ctx, doc).await?;
+    let stale: Vec<Value> = r.stale.iter().map(Stale::json).collect();
+    Ok(json!({"metric": s(doc, "metric_name"), "value": ferrum_domain::util::money(r.value), "unit": s(doc, "unit"),
+              "certified": s(doc, "status") == Some("Certified"), "description": s(doc, "description"), "lineage": s(doc, "uses"),
+              "as_of": Utc::now(), "stale": stale}))
+}
+
+/// A metric's values by period for `ctx` (the `series` operation, `/series`).
+pub(crate) async fn series_json(k: &Kernel, ctx: &Ctx, doc: &Doc, bucket: Bucket, periods: u32) -> Result<Value> {
+    let as_of = Utc::now();
+    let points: Vec<Value> =
+        series(k, ctx, doc, bucket, periods).await?.into_iter().map(|p| json!({"start": p.start, "value": p.value, "partial": p.partial})).collect();
+    Ok(json!({"metric": s(doc, "metric_name"), "bucket": bucket, "as_of": as_of, "unit": s(doc, "unit"), "points": points}))
+}
+
+/// What a change to a metric reaches, as `ctx` may read it (the `impact` operation, `/impact`).
+pub(crate) async fn impact_json(k: &Kernel, ctx: &Ctx, doc: &Doc) -> Result<Value> {
+    let name = s(doc, "metric_name").unwrap_or_default();
+    Ok(json!({"metric": name, "used_by": used_by_readable(k, ctx, name).await?}))
+}
+
 /// What a query of one measure counts for `ctx`.
 async fn query_value(k: &Kernel, ctx: &Ctx, spec: &Spec) -> Result<Decimal> {
     let out = ferrum_studio::run::run(k, ctx, spec).await?;
@@ -790,6 +813,26 @@ impl DocHook for MetricHook {
                 certify(hc, "Metric", doc, fingerprint_of(&kind), json!({})).await.map(Some)
             }
             "deprecate" => deprecate(hc, "Metric", doc, params).await.map(Some),
+            // Reads, through the gate as through `/value`, `/series` and `/impact`: the caller's own rights, nothing written.
+            "value" => {
+                readable_state(hc.kernel, hc.ctx, "Metric", doc).await?;
+                value_json(hc.kernel, hc.ctx, doc).await.map(Some)
+            }
+            "series" => {
+                readable_state(hc.kernel, hc.ctx, "Metric", doc).await?;
+                let bucket: Bucket = serde_json::from_value(params.get("bucket").cloned().unwrap_or(Value::Null))
+                    .map_err(|_| Error::field("bucket", "is day, week, month, quarter, year, fiscal_quarter or fiscal_year"))?;
+                let periods = params
+                    .get("periods")
+                    .and_then(|p| p.as_u64().or_else(|| p.as_str()?.trim().parse().ok()))
+                    .and_then(|p| u32::try_from(p).ok())
+                    .ok_or_else(|| Error::field("periods", "is a number"))?;
+                series_json(hc.kernel, hc.ctx, doc, bucket, periods).await.map(Some)
+            }
+            "impact" => {
+                readable_state(hc.kernel, hc.ctx, "Metric", doc).await?;
+                impact_json(hc.kernel, hc.ctx, doc).await.map(Some)
+            }
             "snapshot" => {
                 let v = value(hc.kernel, hc.ctx, doc).await?;
                 hc.kernel
