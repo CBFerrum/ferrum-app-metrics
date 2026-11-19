@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.11.2
+
+Package only. Needs the same platform as 0.11.0. No database or interface change.
+
+- **Every action says what it promises.** Certify, deprecate and record a value (on metrics and datasets) carry a
+  contract: their effect, what they return and what "done" means, as people's screens, processes and agents over MCP
+  read them; deprecate's parameter is described.
+
+## 0.11.1
+
+Server and database. Needs the same platform as 0.11.0. A package SQL file (`sql/001_metrics.sql`) stops duplicate active
+follows, keeping the first, then adds a unique index. No interface change.
+
+- **Reading through Metrics' endpoints needs a Metrics role.** `/value`, `/series`, `/impact` and `/dataset` looked a
+  metric or dataset up as the system and answered anyone signed in, with its description and lineage. They now refuse
+  a person with no role reading Metric (or Dataset), and a certified one outside the reader's own rules is not found.
+- **Impact names only what the caller may read.** A draft composed of a metric was named to every reader.
+- **A digest is delivered once.** Two upkeep runners that read a subscription due both delivered it. The runner that
+  writes now locks the subscription and finds it as it read it, or writes nothing.
+- **The value is read with no transaction open.** An external metric's value (the engine, over HTTP) was read inside
+  the delivery's transaction; it is read first, then written.
+- **One active follow per person and metric**, by a unique index as well as the save's own check.
+- **A round stops in time.** Upkeep stops starting deliveries after 240 seconds and leaves the rest to the next run,
+  within the platform's 270.
+
 ## 0.11.0
 
 No database or interface change. Needs Ferrum 0.4.0 (apps' upkeep runs one workspace at a time, on whichever replica is free).

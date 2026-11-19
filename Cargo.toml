@@ -26,6 +26,8 @@ tracing = "0.1"
 [dev-dependencies]
 # Its tests check that its interface is a release the platform takes.
 ferrum-apps = { git = "https://github.com/CBFerrum/Ferrum", branch = "main" }
+# The one way an integration suite starts (Ferrum docs/testkit.md).
+ferrum-testkit = { git = "https://github.com/CBFerrum/Ferrum", branch = "main" }
 # The engine for external sources, run beside the server in its tests.
 ferrum-metrics-engine = { path = "engine" }
 tokio = { version = "1.45", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
