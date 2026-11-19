@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.2
+
+Package only. Needs the same platform as 0.11.0. No database or interface change.
+
+- **Every action says what it promises.** Certify, deprecate and record a value (on metrics and datasets) carry a
+  contract: their effect, what they return and what "done" means, as people's screens, processes and agents over MCP
+  read them; deprecate's parameter is described.
+
 ## 0.11.1
 
 Server and database. Needs the same platform as 0.11.0. A package SQL file (`sql/001_metrics.sql`) stops duplicate active

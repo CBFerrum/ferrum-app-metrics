@@ -46,9 +46,32 @@
     - {name: certified_hash, type: data, read_only: true, no_copy: true, hidden: true}
     - {name: replaced_by, type: link, to: Metric, read_only: true, no_copy: true}
   actions:
-    - {name: certify, label: Certify It, permission: write, condition: "doc.status == 'Draft'"}
-    - {name: deprecate, label: Deprecate It, permission: write, condition: "doc.status != 'Deprecated'", params: [{name: replaced_by, type: link, to: Metric, label: Replaced By}]}
-    - {name: snapshot, label: Record Its Value, permission: read, condition: "doc.status == 'Certified'"}
+    - name: certify
+      label: Certify It
+      permission: write
+      condition: "doc.status == 'Draft'"
+      contract:
+        effect: transactional_action
+        returns: {type: object, properties: {status: {type: string, const: Certified}}}
+        completion: "The metric is Certified by the caller, who does not own it, and its definition's fingerprint is fixed: a later change of definition puts it back in draft"
+    - name: deprecate
+      label: Deprecate It
+      permission: write
+      condition: "doc.status != 'Deprecated'"
+      params:
+        - {name: replaced_by, type: link, to: Metric, label: Replaced By, description: "The metric to read instead"}
+      contract:
+        effect: transactional_action
+        returns: {type: object, properties: {status: {type: string, const: Deprecated}}}
+        completion: "The metric is Deprecated, naming what replaces it; it is read and followed no more"
+    - name: snapshot
+      label: Record Its Value
+      permission: read
+      condition: "doc.status == 'Certified'"
+      contract:
+        effect: transactional_action
+        returns: {type: object, properties: {value: {type: string}}}
+        completion: "The caller's value, read with their own rights, is kept as their Metric Value with what the metric meant then"
   list: {columns: [metric_name, domain, owner, status], sort: metric_name asc}
 
 - name: ExternalSource
@@ -123,6 +146,22 @@
     - {name: certified_hash, type: data, read_only: true, no_copy: true, hidden: true}
     - {name: replaced_by, type: link, to: Dataset, read_only: true, no_copy: true}
   actions:
-    - {name: certify, label: Certify It, permission: write, condition: "doc.status == 'Draft'"}
-    - {name: deprecate, label: Deprecate It, permission: write, condition: "doc.status != 'Deprecated'", params: [{name: replaced_by, type: link, to: Dataset, label: Replaced By}]}
+    - name: certify
+      label: Certify It
+      permission: write
+      condition: "doc.status == 'Draft'"
+      contract:
+        effect: transactional_action
+        returns: {type: object, properties: {status: {type: string, const: Certified}}}
+        completion: "The dataset is Certified by the caller, who does not own it, and its definition's fingerprint is fixed: a later change of definition puts it back in draft"
+    - name: deprecate
+      label: Deprecate It
+      permission: write
+      condition: "doc.status != 'Deprecated'"
+      params:
+        - {name: replaced_by, type: link, to: Dataset, label: Replaced By, description: "The dataset to read instead"}
+      contract:
+        effect: transactional_action
+        returns: {type: object, properties: {status: {type: string, const: Deprecated}}}
+        completion: "The dataset is Deprecated, naming what replaces it; it is read and followed no more"
   list: {columns: [dataset_name, domain, owner, status], sort: dataset_name asc}
