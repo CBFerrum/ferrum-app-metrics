@@ -363,6 +363,22 @@ pub(crate) async fn used_by(k: &Kernel, ctx: &Ctx, name: &str) -> Result<Vec<Str
     Ok(out.into_iter().collect())
 }
 
+/// [`used_by`], keeping only the metrics `ctx` may read: a draft composed of it is not told to a reader who cannot see
+/// that draft.
+pub(crate) async fn used_by_readable(k: &Kernel, ctx: &Ctx, name: &str) -> Result<Vec<String>> {
+    let names = used_by(k, ctx, name).await?;
+    if names.is_empty() {
+        return Ok(names);
+    }
+    let q = ferrum_kernel::ListQuery {
+        filters: ferrum_kernel::query::parse_filters(&json!([["metric_name", "in", names]]))?,
+        limit: Some(u32::try_from(names.len()).unwrap_or(u32::MAX)),
+        ..Default::default()
+    };
+    let seen: BTreeSet<String> = k.list(ctx, "Metric", &q).await?.rows.iter().filter_map(|m| s(m, "metric_name").map(str::to_string)).collect();
+    Ok(names.into_iter().filter(|n| seen.contains(n)).collect())
+}
+
 /// A formula's parts must be metrics, never itself, even by way of others, none deprecated, and those
 /// that convert money all into one currency.
 async fn check_parts(k: &Kernel, ctx: &Ctx, me: &str, parts: &[String]) -> Result<()> {
@@ -491,6 +507,36 @@ pub(crate) async fn deprecate(hc: &mut HookCtx<'_>, entity: &str, doc: &Doc, par
     let values = json!({"status": "Deprecated", "replaced_by": replaced.map(|r| r.to_string())});
     hc.kernel.set_values_tx(&elevated(hc.ctx), hc.tx, entity, record, obj(values)).await?;
     Ok(json!({"status": "Deprecated"}))
+}
+
+/// Whether `ctx` may read `doc`, a metric or dataset found by its name: they hold a Metrics role reading `entity`; a
+/// certified one is among the records their own rules reach; a draft is its owner's alone; a deprecated one is refused,
+/// naming what replaces it. Another state, or one out of reach, is not found, so its existence is not told.
+pub(crate) async fn readable_state(k: &Kernel, ctx: &Ctx, entity: &str, doc: &Doc) -> Result<()> {
+    if ctx.perms.access(entity, ferrum_kernel::Action::Read) == ferrum_kernel::Access::None {
+        return Err(Error::Forbidden(format!("reading a {} needs a Metrics role", entity.to_lowercase())));
+    }
+    let (name_field, verb) = if entity == "Dataset" { ("dataset_name", "load") } else { ("metric_name", "read") };
+    let reachable = || async {
+        let id = id(doc, "id").ok_or_else(|| Error::NotFound(entity.to_lowercase()))?;
+        k.get(ctx, entity, id, false).await.map(|_| ()).map_err(|_| Error::NotFound(entity.to_lowercase()))
+    };
+    match s(doc, "status") {
+        Some("Certified") => reachable().await,
+        Some("Draft") if s(doc, "owner").is_some_and(|o| o.eq_ignore_ascii_case(&ctx.email)) => reachable().await,
+        Some("Deprecated") => {
+            let name = s(doc, name_field).unwrap_or_default();
+            let instead = match id(doc, "replaced_by") {
+                Some(r) => k.get(&sys(ctx), entity, r, false).await.ok().and_then(|d| s(&d, name_field).map(str::to_string)),
+                None => None,
+            };
+            Err(Error::invalid(match instead {
+                Some(n) => format!("{name} is deprecated: {verb} {n} instead"),
+                None => format!("{name} is deprecated"),
+            }))
+        }
+        _ => Err(Error::NotFound(entity.to_lowercase())),
+    }
 }
 
 /// A metric's value for its reader, and the external datasets it was read from whose data is older than

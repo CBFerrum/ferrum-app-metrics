@@ -5,7 +5,7 @@
 //! (`warehouse`). `POST import/wren` reviews a Wren semantic model against the metrics defined here
 //! and brings in what a reviewer accepts, as drafts (`wren`).
 
-use ferrum_domain::util::{id, s, sys};
+use ferrum_domain::util::{s, sys};
 use ferrum_kernel::{Error, Filter, Kernel, Result, Site, SiteRequest, SiteResponse};
 use serde_json::{Value, json};
 
@@ -37,21 +37,7 @@ impl Site for MetricsSite {
         let found = k.find_tx(&sys(user), &mut tx, "Metric", &[Filter::eq("metric_name", name)], None, 1).await?;
         tx.commit().await?;
         let metric = found.into_iter().next().ok_or_else(|| Error::NotFound("metric".into()))?;
-        match s(&metric, "status") {
-            Some("Certified") => {}
-            Some("Draft") if s(&metric, "owner").is_some_and(|o| o.eq_ignore_ascii_case(&user.email)) => {}
-            Some("Deprecated") => {
-                let instead = match id(&metric, "replaced_by") {
-                    Some(r) => k.get(&sys(user), "Metric", r, false).await.ok().and_then(|m| s(&m, "metric_name").map(str::to_string)),
-                    None => None,
-                };
-                return Err(Error::invalid(match instead {
-                    Some(n) => format!("{name} is deprecated: read {n} instead"),
-                    None => format!("{name} is deprecated"),
-                }));
-            }
-            _ => return Err(Error::NotFound("metric".into())),
-        }
+        crate::metric::readable_state(k, user, "Metric", &metric).await?;
         let as_of = chrono::Utc::now();
         let out = match path.as_str() {
             // Each period's value, the current one marked partial, and when it was worked out.
@@ -67,7 +53,7 @@ impl Site for MetricsSite {
                 json!({"metric": name, "bucket": bucket, "as_of": as_of, "unit": s(&metric, "unit"), "points": points})
             }
             // What a change to it reaches: the metrics composed of it, directly or by way of others.
-            "impact" => json!({"metric": name, "used_by": crate::metric::used_by(k, user, name).await?}),
+            "impact" => json!({"metric": name, "used_by": crate::metric::used_by_readable(k, user, name).await?}),
             // Its value, and the external datasets it was read from that are older than their sources allow.
             _ => {
                 let r = crate::metric::read(k, user, &metric).await?;

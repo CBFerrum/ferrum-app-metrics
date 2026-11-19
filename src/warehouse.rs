@@ -61,21 +61,7 @@ pub(crate) async fn dataset(k: &Kernel, user: &Ctx, name: &str, format: &str) ->
     let found = k.find_tx(&sys(user), &mut tx, "Dataset", &[Filter::eq("dataset_name", name)], None, 1).await?;
     tx.commit().await?;
     let set = found.into_iter().next().ok_or_else(|| Error::NotFound("dataset".into()))?;
-    match s(&set, "status") {
-        Some("Certified") => {}
-        Some("Draft") if s(&set, "owner").is_some_and(|o| o.eq_ignore_ascii_case(&user.email)) => {}
-        Some("Deprecated") => {
-            let instead = match id(&set, "replaced_by") {
-                Some(r) => k.get(&sys(user), "Dataset", r, false).await.ok().and_then(|d| s(&d, "dataset_name").map(str::to_string)),
-                None => None,
-            };
-            return Err(Error::invalid(match instead {
-                Some(n) => format!("{name} is deprecated: load {n} instead"),
-                None => format!("{name} is deprecated"),
-            }));
-        }
-        _ => return Err(Error::NotFound("dataset".into())),
-    }
+    crate::metric::readable_state(k, user, "Dataset", &set).await?;
     let (columns, list, truncated) = rows(k, user, &set).await?;
     let (ctype, body, ext) = match format {
         "csv" => ("text/csv; charset=utf-8", csv(&columns, &list), "csv"),

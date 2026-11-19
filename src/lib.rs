@@ -71,10 +71,18 @@ pub fn reports() -> Vec<Arc<dyn ReportSource>> {
     vec![]
 }
 
+/// How long one upkeep call works before it leaves the rest to the next: within the platform's 270 seconds, with room
+/// for one engine read already under way (15 s).
+const UPKEEP_BUDGET: std::time::Duration = std::time::Duration::from_secs(240);
+
 /// Upkeep, for one workspace: its followed metrics delivered on the day they are due.
 pub async fn maintenance(k: &Kernel, tenant: Uuid) -> Result<()> {
-    delivery::deliver(k, tenant).await.map(|_| ())
+    let deadline = std::time::Instant::now() + UPKEEP_BUDGET;
+    delivery::deliver(k, tenant, deadline).await.map(|_| ())
 }
+
+#[doc(hidden)]
+pub use delivery::{Due, deliver_due, due as digests_due};
 
 /// A document from JSON.
 pub(crate) fn obj(v: Value) -> Doc {
