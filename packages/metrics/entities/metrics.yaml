@@ -64,6 +64,53 @@
         effect: transactional_action
         returns: {type: object, properties: {status: {type: string, const: Deprecated}}}
         completion: "The metric is Deprecated, naming what replaces it; it is read and followed no more"
+    - name: value
+      label: Its Value For Me
+      permission: read
+      read_only: true
+      hidden: true
+      contract:
+        effect: query
+        returns:
+          type: object
+          properties:
+            metric: {type: string}
+            value: {type: string}
+            unit: {type: [string, "null"]}
+            certified: {type: boolean}
+            description: {type: [string, "null"]}
+            lineage: {type: [string, "null"]}
+            as_of: {type: string}
+            stale: {type: array}
+        completion: "The metric's value as the caller may count it, with their own rights to the records, and which of the external datasets it was read from are older than they allow; nothing is written"
+    - name: series
+      label: Its Values By Period
+      permission: read
+      read_only: true
+      hidden: true
+      params:
+        - {name: bucket, label: Period, type: select, options: [day, week, month, quarter, year, fiscal_quarter, fiscal_year], required: true}
+        - {name: periods, label: How Many, type: int, required: true, description: "The last 1 to 120 periods, the current one among them"}
+      contract:
+        effect: query
+        returns:
+          type: object
+          properties:
+            metric: {type: string}
+            bucket: {type: string}
+            unit: {type: [string, "null"]}
+            as_of: {type: string}
+            points: {type: array, items: {type: object, properties: {start: {type: string}, value: {type: [string, "null"]}, partial: {type: boolean}}}}
+        completion: "One value per period for the caller, by the metric's series date, the current period marked partial; nothing is written"
+    - name: impact
+      label: What A Change Reaches
+      permission: read
+      read_only: true
+      hidden: true
+      contract:
+        effect: query
+        returns: {type: object, properties: {metric: {type: string}, used_by: {type: array, items: {type: string}}}}
+        completion: "The metrics the caller may read that are composed of this one, directly or by way of others; nothing is written"
     - name: snapshot
       label: Record Its Value
       permission: read
